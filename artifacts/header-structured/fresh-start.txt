@@ -1,0 +1,32 @@
+
+                                                                ██████╗ ██╗
+                                                                ██╔══██╗██║
+                                                                ██████╔╝██║
+                                                                ██╔═══╝ ██║
+                                                                ██║     ██║
+                                                                ╚═╝     ╚═╝
+                                                                 Pi 0.80.7
+                                                    ◆ ~/Documents/dev_shit/pi-extensions
+
+                  [Agents]
+                    Atlas  gpt-5.6-luna · medium                        Mason  gpt-5.6-luna · xhigh
+                    Forge  gpt-5.6-sol · low                            Vigil  gpt-5.6-sol · high
+
+                  [Setup]
+                    native in-process agents  ·  concurrency 10
+                    subagent  ·  web_search  ·  persistent follow-ups  ·  nested delegation
+
+                  [Commands]
+                    /agents  ·  /handoff  ·  /create-skill
+
+                  [Skills]
+                    pi-internals  ·  terminal-control
+
+                  [Shortcuts]
+                    Alt+. deeper thinking  ·  Alt+, lighter thinking  ·  Alt+M next model
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+0%/272.0k  ·  ↑0  ↓0  ·  ↳ $0.00    ◆ $0.00                                                                 codex  ·  gpt-5.6-sol  ·  medium

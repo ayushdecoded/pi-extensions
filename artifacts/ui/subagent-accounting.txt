@@ -1,0 +1,40 @@
+                                                                     ██████╗  ██╗
+                                                                     ██╔══██╗ ██║
+                                                                     ██████╔╝ ██║
+                                                                     ██╔═══╝  ██║
+                                                                     ██║      ██║
+                                                                     ╚═╝      ╚═╝
+                                                          ~/Documents/dev_shit/pi-extensions
+
+
+[Skills]
+  implementation-handoff, pi-internals, terminal-control, workflow-authoring
+
+[Prompts]
+  /handoff
+
+[Extensions]
+  src
+
+[Themes]
+  pi-blueprint
+
+
+ Switched to GPT-5.6 Terra (thinking: high)
+
+
+ Call the subagent tool with one Atlas agent. Ask it to reply with exactly ATLAS_OK and do nothing else. Then reply briefly.
+
+
+
+ subagent
+ Agents ✓ 1 · Atlas×1 · 1.5k tok · 2s · $0.002
+
+
+ ATLAS_OK
+
+Agents ✓ 1 · Atlas×1 · 1.5k tok · 2s · $0.002
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑3.9k ↓62 R1.5k  ·  ↳$0.01 ◆$0.01                                                                               codex gpt-5.6-terra high

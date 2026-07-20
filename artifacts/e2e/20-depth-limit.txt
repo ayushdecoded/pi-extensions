@@ -1,0 +1,34 @@
+
+
+ Planning call timeout duration
+
+
+ subagent
+ Agents ! 1 · Atlas×1 · 790 tok · 29s · $0.001
+
+
+ Operation aborted
+
+
+ Call Forge with this task: Call Mason with task "If a tool named subagent is available, use it to call Atlas. If it is not
+ available, reply exactly DEPTH_BLOCKED." Return Mason exact output. After Forge returns, report the result.
+
+
+ Planning Forge integration call
+
+
+ subagent
+ Agents ✓ 2 · Forge×1 · Mason×1 · 4.6k tok · 8s · $0.021
+
+
+ DEPTH_BLOCKED
+
+Agents ✓ 2 · Forge×1 · Mason×1 · 4.6k tok · 8s · $0.021
+Agents ! 1 · Atlas×1 · 790 tok · 29s · $0.001
+Agents ✓ 1 · Mason×1 · 1.6k tok · 4s · $0.002
+… 3 older batches · /agents
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Documents/dev_shit/pi-extensions
+↑13k ↓458 R1.5k CH88.1% $0.016 (sub) 0.6%/272k                                                              gpt-5.6-luna • minimal

@@ -1,0 +1,9 @@
+{
+  "pid": 1293020,
+  "scenario": "settled /agents Markdown viewer open at 58x24",
+  "seconds": 10.00947556400206,
+  "cpuPercentOneCore": 0.19981066812259102,
+  "rssStartMiB": 196.8671875,
+  "rssEndMiB": 196.25,
+  "rssMaxMiB": 196.8671875
+}

@@ -1,0 +1,9 @@
+{
+  "pid": 1388979,
+  "duration_seconds": 10.008594541002822,
+  "cpu_percent_one_core_average": 0.0,
+  "cpu_percent_one_core_peak_250ms": 0.0,
+  "rss_start_mib": 143.8671875,
+  "rss_end_mib": 143.8671875,
+  "rss_delta_mib": 0.0
+}

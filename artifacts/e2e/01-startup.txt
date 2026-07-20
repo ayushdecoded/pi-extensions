@@ -1,0 +1,23 @@
+Model scope: gpt-5.6-luna, gpt-5.3-codex-spark, gpt-5.6-sol, gpt-5.6-terra (Alt+J to cycle)
+
+ pi v0.80.7
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · alt+o more
+ Press alt+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Skills]
+  implementation-handoff, pi-internals, workflow-authoring
+
+[Extensions]
+  src
+
+[Themes]
+  pi-blueprint
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Documents/dev_shit/pi-extensions
+$0.000 (sub) 0.0%/272k                                                                                      gpt-5.6-luna • minimal

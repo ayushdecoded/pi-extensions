@@ -1,0 +1,36 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+✓ Mason ↻ · gpt-5.6-luna · xhigh                                                      complete · 10s · 5.5k tok · $0.002
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+
+ $ printf 'native-e2e-line-1\nnative-e2e-line-2\n'
+
+ native-e2e-line-1
+ native-e2e-line-2
+
+
+Read package.json and ran the requested command successfully. No files were edited.
+
+Native Tool E2E Complete
+
+> Use bash to run exactly: for i in 1 2 3 4 5; do echo native-live-$i; sleep 1; done
+  Do not edit files. Then reply with exactly: live done
+
+~ Planning exact command execution
+
+
+ $ for i in 1 2 3 4 5; do echo native-live-$i; sleep 1; done
+
+ native-live-1
+ native-live-2
+ native-live-3
+ native-live-4
+ native-live-5
+
+
+live done
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+read-only · ↑↓/PgUp/PgDn scroll · End follow · alt+o expand tools · Esc back · following
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑13.7k  ↓416  CH0.0%  ·  ↳ $0.05    ◆ $0.05                                 codex  ·  gpt-5.6-sol  ·  high

@@ -1,0 +1,229 @@
+{
+  "rootSession": "/tmp/pi-subagents-termctrl-e2e/sessions/2026-07-15T05-26-22-842Z_019f643d-8b7a-7102-9954-61e122ae7a7f.jsonl",
+  "batchCount": 6,
+  "agents": {
+    "atlas-1": {
+      "role": "Atlas",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f643d-8b7a-7102-9954-61e122ae7a7f/2026-07-15T05-26-36-705Z_019f643d-c1a1-7da6-8b51-817cf62252b3.jsonl",
+      "models": [
+        "openai-codex/gpt-5.6-luna"
+      ],
+      "toolCalls": [
+        "bash",
+        "bash"
+      ],
+      "containsInjectedReadonlyText": false,
+      "userTurns": 2,
+      "thinkingLevels": [
+        "medium"
+      ]
+    },
+    "mason-1": {
+      "role": "Mason",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f643d-8b7a-7102-9954-61e122ae7a7f/2026-07-15T05-26-36-705Z_019f643d-c1a1-7da6-8b51-87fc38e7aaab.jsonl",
+      "models": [
+        "openai-codex/gpt-5.6-luna"
+      ],
+      "toolCalls": [
+        "bash"
+      ],
+      "containsInjectedReadonlyText": false,
+      "userTurns": 2,
+      "thinkingLevels": [
+        "xhigh"
+      ]
+    },
+    "forge-1": {
+      "role": "Forge",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f643d-8b7a-7102-9954-61e122ae7a7f/2026-07-15T05-28-20-577Z_019f643f-5761-736b-9f97-7ca7679251b9.jsonl",
+      "models": [
+        "openai-codex/gpt-5.6-sol"
+      ],
+      "toolCalls": [
+        "subagent"
+      ],
+      "containsInjectedReadonlyText": false,
+      "userTurns": 1,
+      "thinkingLevels": [
+        "low"
+      ]
+    },
+    "atlas-2": {
+      "role": "Atlas",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f643d-8b7a-7102-9954-61e122ae7a7f/2026-07-15T05-28-28-831Z_019f643f-779f-793d-bfe4-8ed3aed58ab2.jsonl",
+      "models": [
+        "openai-codex/gpt-5.6-luna"
+      ],
+      "toolCalls": [
+        "bash"
+      ],
+      "containsInjectedReadonlyText": false,
+      "userTurns": 1,
+      "thinkingLevels": [
+        "medium"
+      ]
+    },
+    "atlas-3": {
+      "role": "Atlas",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f643d-8b7a-7102-9954-61e122ae7a7f/2026-07-15T05-30-03-045Z_019f6440-e7a5-78a1-907c-6c2d649c3d78.jsonl",
+      "models": [
+        "openai-codex/gpt-5.6-luna"
+      ],
+      "toolCalls": [
+        "bash"
+      ],
+      "containsInjectedReadonlyText": false,
+      "userTurns": 1,
+      "thinkingLevels": [
+        "medium"
+      ]
+    },
+    "forge-2": {
+      "role": "Forge",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f643d-8b7a-7102-9954-61e122ae7a7f/2026-07-15T05-30-52-162Z_019f6441-a782-7106-84cb-ab32038e5618.jsonl",
+      "models": [
+        "openai-codex/gpt-5.6-sol"
+      ],
+      "toolCalls": [
+        "subagent"
+      ],
+      "containsInjectedReadonlyText": false,
+      "userTurns": 1,
+      "thinkingLevels": [
+        "low"
+      ]
+    },
+    "mason-2": {
+      "role": "Mason",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f643d-8b7a-7102-9954-61e122ae7a7f/2026-07-15T05-30-56-433Z_019f6441-b831-7a79-b2d9-00e7241765f8.jsonl",
+      "models": [
+        "openai-codex/gpt-5.6-luna"
+      ],
+      "toolCalls": [],
+      "containsInjectedReadonlyText": false,
+      "userTurns": 1,
+      "thinkingLevels": [
+        "xhigh"
+      ]
+    }
+  },
+  "invocations": [
+    {
+      "id": "eaa1cd04-b38b-45c6-b150-e4ff79e9a6a0",
+      "agent": "atlas-1",
+      "role": "Atlas",
+      "depth": 1,
+      "followup": false,
+      "ordinal": 1,
+      "parentInvocationId": null,
+      "status": "complete",
+      "tokens": 1543,
+      "cost": 0.0016979999999999999,
+      "task": "Use bash to run sleep 12, then reply exactly ALPHA_OK."
+    },
+    {
+      "id": "38a93171-ec30-4151-9953-2c5126ea6218",
+      "agent": "mason-1",
+      "role": "Mason",
+      "depth": 1,
+      "followup": false,
+      "ordinal": 1,
+      "parentInvocationId": null,
+      "status": "complete",
+      "tokens": 3185,
+      "cost": 0.00334,
+      "task": "Use bash to run sleep 6, then reply exactly BETA_OK."
+    },
+    {
+      "id": "191729a1-f8b7-4721-8f1c-44b8e00a7bdd",
+      "agent": "atlas-1",
+      "role": "Atlas",
+      "depth": 1,
+      "followup": true,
+      "ordinal": 2,
+      "parentInvocationId": null,
+      "status": "complete",
+      "tokens": 1675,
+      "cost": 0.00183,
+      "task": "Use bash to run sleep 8, then reply exactly FOLLOWUP_OK."
+    },
+    {
+      "id": "813f2d96-b2cb-4c01-a71a-eb3aa19b0136",
+      "agent": "forge-1",
+      "role": "Forge",
+      "depth": 1,
+      "followup": false,
+      "ordinal": 1,
+      "parentInvocationId": null,
+      "status": "complete",
+      "tokens": 3284,
+      "cost": 0.017795,
+      "task": "Use your subagent tool to call Atlas with task \"Use bash to run sleep 10, then reply exactly NESTED_CHILD_OK.\" After Atlas returns, reply exactly NESTED_PARENT_OK."
+    },
+    {
+      "id": "9977116e-1d04-41ca-b396-5f68bff3d5c0",
+      "agent": "atlas-2",
+      "role": "Atlas",
+      "depth": 2,
+      "followup": false,
+      "ordinal": 1,
+      "parentInvocationId": "813f2d96-b2cb-4c01-a71a-eb3aa19b0136",
+      "status": "complete",
+      "tokens": 1587,
+      "cost": 0.0018470000000000001,
+      "task": "Use bash to run sleep 10, then reply exactly NESTED_CHILD_OK."
+    },
+    {
+      "id": "eb1da087-61a7-4d81-bc5a-26fac6cfda9d",
+      "agent": "mason-1",
+      "role": "Mason",
+      "depth": 1,
+      "followup": true,
+      "ordinal": 2,
+      "parentInvocationId": null,
+      "status": "complete",
+      "tokens": 1633,
+      "cost": 0.0016880000000000003,
+      "task": "Reply exactly REOPENED_FOLLOWUP_OK and nothing else."
+    },
+    {
+      "id": "1bd700cb-9566-4517-9126-e8f00b9b4c99",
+      "agent": "atlas-3",
+      "role": "Atlas",
+      "depth": 1,
+      "followup": false,
+      "ordinal": 1,
+      "parentInvocationId": null,
+      "status": "cancelled",
+      "tokens": 790,
+      "cost": 0.00106,
+      "task": "Use bash to run sleep 60, then reply SHOULD_NOT_COMPLETE."
+    },
+    {
+      "id": "4d81bfaa-ab74-4a88-9571-ff4125755f96",
+      "agent": "forge-2",
+      "role": "Forge",
+      "depth": 1,
+      "followup": false,
+      "ordinal": 1,
+      "parentInvocationId": null,
+      "status": "complete",
+      "tokens": 3376,
+      "cost": 0.019455000000000004,
+      "task": "Call Mason with task \"If a tool named subagent is available, use it to call Atlas. If it is not available, reply exactly DEPTH_BLOCKED.\" Return Mason exact output."
+    },
+    {
+      "id": "de2bd8c8-a2e7-40f0-9bd0-52ced3d37e88",
+      "agent": "mason-2",
+      "role": "Mason",
+      "depth": 2,
+      "followup": false,
+      "ordinal": 1,
+      "parentInvocationId": "4d81bfaa-ab74-4a88-9571-ff4125755f96",
+      "status": "complete",
+      "tokens": 1209,
+      "cost": 0.001399,
+      "task": "If a tool named subagent is available, use it to call Atlas. If it is not available, reply exactly DEPTH_BLOCKED. Return only the exact output produced by Atlas (or DEPTH_BLOCKED if unavailable), with no commentary."
+    }
+  ]
+}

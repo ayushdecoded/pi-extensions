@@ -1,0 +1,44 @@
+                                                                 Pi 0.80.7
+                                                                   ◆ /tmp
+
+                  [Agents]
+                    Atlas  gpt-5.6-luna · medium                        Mason  gpt-5.6-luna · xhigh
+                    Forge  gpt-5.6-sol · low                            Vigil  gpt-5.6-sol · high
+
+                  [Setup]
+                    native in-process agents  ·  concurrency 10
+                    subagent  ·  web_search  ·  persistent follow-ups  ·  nested delegation
+
+                  [Commands]
+                    /agents  ·  /handoff  ·  /create-skill
+
+                  [Skills]
+                    pi-internals
+
+                  [Shortcuts]
+                    Alt+. deeper thinking  ·  Alt+, lighter thinking  ·  Alt+M next model
+
+
+ Call the subagent tool once with Atlas and Forge in parallel. Tell each to run bash sleep 10, make no edits, and then return exactly
+ ROLE_OK.
+
+
+ Planning single-call parallel compliance
+
+
+ Subagents · 2
+   Atlas  gpt-5.6-luna  thinking medium   timeout 2m
+   Forge  gpt-5.6-sol   thinking low      timeout 2m
+ Subagents ✓  2 agents  Atlas×1  Forge×1  ·  8.9k tok  ·  50s  ·  $0.022
+ ✓  Atlas    complete        14s   3.1k tok  $0.003
+ ✓  Forge    complete        50s   5.8k tok  $0.018
+
+
+ ATLAS_OK
+ FORGE_OK
+
+See all agent batches in /agents
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑8.8k  ↓232  CH73.2%  ·  ↳ $0.04    ◆ $0.04                                                   codex  ·  gpt-5.6-sol  ·  medium

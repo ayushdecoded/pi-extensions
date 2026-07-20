@@ -1,0 +1,26 @@
+
+
+                                                                ██████╗  ██╗
+                                                                ██╔══██╗ ██║
+                                                                ██████╔╝ ██║
+                                                                ██╔═══╝  ██║
+                                                                ██║      ██║
+                                                                ╚═╝      ╚═╝
+                                                                    /tmp
+
+
+[Prompts]
+  /handoff
+
+[Extensions]
+  src
+
+
+ Warning: No models available. Use /login to log into a provider via OAuth or API key. See:
+   /home/arayush/.nvm/versions/node/v26.1.0/lib/node_modules/@earendil-works/pi-coding-agent/docs/providers.md
+   /home/arayush/.nvm/versions/node/v26.1.0/lib/node_modules/@earendil-works/pi-coding-agent/docs/models.md
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+↑0 ↓0 R0  ·  ↳$0.00 ◆$0.00                                                                                               unknown unknown off

@@ -1,0 +1,27 @@
+{
+  "fixture": {
+    "messages": 1600,
+    "renderedLines": 8799,
+    "width": 100
+  },
+  "transcript": {
+    "coldMs": 108.460554,
+    "warmMeanMs": 0.05611595400000033,
+    "warmP95Ms": 0.05723699999998644,
+    "liveTailMeanMs": 0.0842170916666684,
+    "liveTailP95Ms": 0.11595699999998033,
+    "coldFullLiveMeanMs": 62.37242275000003,
+    "liveTailSpeedupVsCold": 740.6147792050376
+  },
+  "projection": {
+    "batches": 1000,
+    "coldMs": 13.099255000000085,
+    "warm10000TotalMs": 0.47936299999992116,
+    "warmMeanMs": 0.000047936299999992116
+  },
+  "memory": {
+    "heapBeforeMiB": 68.12336730957031,
+    "heapAfterColdMiB": 70.70345306396484,
+    "coldDeltaMiB": 2.5800857543945312
+  }
+}

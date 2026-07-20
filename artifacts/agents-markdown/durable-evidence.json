@@ -1,0 +1,54 @@
+{
+  "rootSessionFile": "/tmp/pi-agents-markdown-e2e/2026-07-15T21-21-01-348Z_019f67a7-8ba4-738d-8bae-2c5c87876cb9.jsonl",
+  "agents": [
+    {
+      "handle": "mason-1",
+      "role": "Mason",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f67a7-8ba4-738d-8bae-2c5c87876cb9/2026-07-15T21-21-27-586Z_019f67a7-f222-7ebe-870d-de4e4b2388f8.jsonl",
+      "createdAt": 1784150487587
+    }
+  ],
+  "invocations": [
+    {
+      "id": "60463393-abd5-471a-8225-5755e151cced",
+      "agent": "mason-1",
+      "followup": false,
+      "ordinal": 1,
+      "status": "complete",
+      "usage": {
+        "input": 2900,
+        "output": 193,
+        "cacheRead": 1536,
+        "cacheWrite": 0,
+        "total": 4629,
+        "cost": 0.0042116
+      }
+    },
+    {
+      "id": "102f0cac-fb37-4fd2-90ba-b7ee9d8b4a0a",
+      "agent": "mason-1",
+      "followup": true,
+      "ordinal": 2,
+      "status": "complete",
+      "usage": {
+        "input": 3495,
+        "output": 484,
+        "cacheRead": 1536,
+        "cacheWrite": 0,
+        "total": 5515,
+        "cost": 0.0065526
+      }
+    }
+  ],
+  "children": [
+    {
+      "handle": "mason-1",
+      "sessionFile": "/home/arayush/.pi/agent/subagent-sessions/019f67a7-8ba4-738d-8bae-2c5c87876cb9/2026-07-15T21-21-27-586Z_019f67a7-f222-7ebe-870d-de4e4b2388f8.jsonl",
+      "assistantMessages": 4,
+      "hasMarkdownHeading": true,
+      "hasMarkdownTable": true,
+      "hasLiveStreamHeading": true,
+      "has80thItem": true
+    }
+  ]
+}

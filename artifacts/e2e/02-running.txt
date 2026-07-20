@@ -1,0 +1,36 @@
+
+ pi v0.80.7
+ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · alt+o more
+ Press alt+o to show full startup help and loaded resources.
+
+ Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.
+
+[Skills]
+  implementation-handoff, pi-internals, workflow-authoring
+
+[Extensions]
+  src
+
+[Themes]
+  pi-blueprint
+
+
+ Use the subagent tool exactly once with two agents in one call. Atlas task: Use bash to run sleep 12, then reply exactly
+ ALPHA_OK. Mason task: Use bash to run sleep 6, then reply exactly BETA_OK. After both return, reply exactly BATCH_DONE. Do not
+ perform either task yourself.
+
+
+
+ subagent
+
+
+ ⠸ Working...
+
+Agents ◐ 2 · Atlas×1 · Mason×1 · 0 tok · 5s · $0.000
+└─ ◐ Atlas · Use bash to run sleep 12, then reply exactly ALPHA_OK.
+└─ ◐ Mason · Use bash to run sleep 6, then reply exactly BETA_OK. · bash
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Documents/dev_shit/pi-extensions
+↑910 ↓71 $0.001 (sub) 0.4%/272k                                                                             gpt-5.6-luna • minimal

@@ -1,0 +1,36 @@
+       "agent": "atlas-1",
+       "task": "Use bash to run sleep 8, then reply exactly FOLLOWUP_OK.",
+       "timeoutMinutes": 1
+     }
+   ]
+ }
+ [Atlas · atlas-1 · complete]
+ FOLLOWUP_OK
+
+
+ FOLLOWUP_DONE
+
+ Reloaded keybindings, extensions, skills, prompts, themes, and context files
+
+
+ Call Forge with this task: Use your subagent tool to call Atlas with task "Use bash to run sleep 10, then reply exactly
+ NESTED_CHILD_OK." After Atlas returns, reply exactly NESTED_PARENT_OK. After Forge returns, reply exactly NESTED_DONE.
+
+
+ Planning Forge API call
+
+
+ subagent
+
+
+ ⠴ Working...
+
+Agents ◐ 1 · Forge×1 · 0 tok · 5s · $0.000
+└─ ◐ Forge · Use your subagent tool to call Atlas with task "Use bash to run sleep 10, then reply exactly NESTED_CHILD_OK." Aft...
+Agents ✓ 1 · Atlas×1 · 1.7k tok · 11s · $0.002
+Agents ✓ 2 · Atlas×1 · Mason×1 · 4.7k tok · 19s · $0.005
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Documents/dev_shit/pi-extensions
+↑5.3k ↓223 $0.007 (sub) 0.5%/272k                                                                           gpt-5.6-luna • minimal

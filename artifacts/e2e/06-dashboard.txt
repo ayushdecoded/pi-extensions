@@ -1,0 +1,36 @@
+Agents
+Delegation batches
+› ✓ 1 · Atlas×1 · 1.7k tok · 11s · $0.002
+  ✓ 2 · Atlas×1 · Mason×1 · 4.7k tok · 19s · $0.005
+↑↓ select · Enter open · Esc close
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+~/Documents/dev_shit/pi-extensions
+↑4.1k ↓143 $0.005 (sub) 0.4%/272k                                                                           gpt-5.6-luna • minimal

@@ -1,0 +1,20 @@
+
+[Skills]
+  implementation-handoff, pi-internals, terminal-control, workflow-authoring
+
+[Prompts]
+  /handoff
+
+[Extensions]
+  src
+
+[Themes]
+  pi-blueprint
+
+
+ Navigated to selected point
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Call the subagent tool with one Atlas agent. Ask it to reply with exactly ATLAS_OK and do nothing else. Then reply briefly.
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+0%/272.0k  ·  ↑0 ↓0 R0  ·  ↳$0.00 ◆$0.01                                                                                      codex gpt-5.6-terra high

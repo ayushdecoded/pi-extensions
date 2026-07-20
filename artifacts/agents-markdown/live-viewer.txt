@@ -1,0 +1,36 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+✓ Mason · gpt-5.6-luna · xhigh                                                        complete · 17s · 4.6k tok · $0.004
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> Run exactly this command using bash: bash -lc "sleep 10". After it completes, return a concise Markdown report
+  containing all of the following: (1) a level-1 heading named exactly Markdown E2E; (2) bold text; (3) a three-item
+  bullet list; (4) a TypeScript fenced code block; and (5) a two-column Markdown table. Do not omit any required
+  element.
+
+~ Planning exact bash command execution
+→ bash {"command":"bash -lc \"sleep 10\"","timeout":20}
+
+  output: /home/arayush/.bashrc: line 43: /home/linuxbrew/.linuxbrew/home/linuxbrew/.linuxbrew/home/linuxbrew/.linuxbrew
+
+~ Drafting concise Markdown report format
+Markdown E2E
+
+Command completed successfully.
+
+- Ran the requested command
+- Waited 10 seconds
+- No blocking errors
+
+```typescript
+  const status: string = "completed";
+```
+
+┌───────────┬──────────┐
+│ Item      │ Status   │
+├───────────┼──────────┤
+│ Execution │ Complete │
+└───────────┴──────────┘
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+read-only · ↑↓/PgUp/PgDn scroll · End follow · Esc back · following
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑5.7k  ↓344  CH67.8%  ·  ↳ $0.02    ◆ $0.02                                codex  ·  gpt-5.6-sol  ·  xhigh

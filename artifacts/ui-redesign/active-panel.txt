@@ -1,0 +1,44 @@
+                                                                          ██║      ██║
+                                                                          ╚═╝      ╚═╝
+                                                                              /tmp
+
+
+[Skills]
+  pi-internals
+
+[Prompts]
+  /create-skill, /handoff
+
+[Extensions]
+  herdr-agent-state.ts, pi-documentation.ts, src
+
+[Themes]
+  pi-blueprint
+
+
+ Call the subagent tool once with three fresh agents in parallel: Atlas, Mason, and Forge. Tell each to run bash sleep 12, make no edits, then return exactly
+ its role followed by _OK. After all finish, reply briefly.
+
+
+ Planning parallel agent calls
+
+
+ Requests · 3
+  1  Atlas  timeout 2m
+  2  Mason  timeout 2m
+  3  Forge  timeout 2m
+ Agents ✓  3 agents  Atlas×1  Mason×1  Forge×1  ·  14k tok  ·  16s  ·  $0.027
+
+ ✓  Atlas    complete        15s   3.1k tok  $0.003
+ ✓  Mason    complete        16s   5.2k tok  $0.005
+ ✓  Forge    complete        15s   5.7k tok  $0.018
+
+
+ All three agents completed successfully: Atlas_OK, Mason_OK, Forge_OK.
+
+Agents ✓  3 agents  Atlas×1 · Mason×1 · Forge×1
+          14k tok  ·  16s  ·  $0.027
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑13.8k  ↓322  CH71.6%  ·  ↳ $0.05    ◆ $0.05                                                                      codex  ·  gpt-5.6-sol  ·  medium

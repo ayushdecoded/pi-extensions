@@ -1,0 +1,42 @@
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+✓ Forge · gpt-5.6-sol · low                                                                                         complete · 50s · 5.8k tok · $0.018
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+> Run `bash -lc 'sleep 10'`. Make no edits to any files. After the command completes, return exactly this text and nothing else: FORGE_OK
+
+→ bash {"command":"bash -lc 'sleep 10'","timeout":20}
+
+  output: /home/arayush/.bashrc: line 43: /home/linuxbrew/.linuxbrew/home/linuxbrew/.linuxbrew/home/linuxbrew/.linuxbrew/home/linuxbrew/.linuxbrew/...
+
+FORGE_OK
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+read-only · ↑↓/PgUp/PgDn scroll · End follow · Esc back · following
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑8.8k  ↓232  CH73.2%  ·  ↳ $0.04    ◆ $0.04                                                             codex  ·  gpt-5.6-sol  ·  medium

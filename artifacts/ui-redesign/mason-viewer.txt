@@ -1,0 +1,46 @@
+Mason  ✓ complete  16s  5.2k tok  $0.005
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+Run the Bash command sleep 12. Make no edits. After the command finishes, return exactly Mason_OK and nothing else.
+
+
+
+TOOL bash
+{"command":"sleep 12","timeout":20}
+
+RESULT bash
+(no output)
+
+
+Mason_OK
+read-only · ↑↓/PgUp/PgDn scroll · End follow · Esc back · following
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑18.4k  ↓434  CH67.2%  ·  ↳ $0.06    ◆ $0.06                                                                      codex  ·  gpt-5.6-sol  ·  medium

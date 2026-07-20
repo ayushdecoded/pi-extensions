@@ -1,0 +1,10 @@
+{
+  "pid": 1293020,
+  "scenario": "real follow-up agent: /agents viewer open across sleep, Markdown streaming, and settlement",
+  "seconds": 20.038513295003213,
+  "cpuPercentOneCore": 1.8963482689843887,
+  "cpuSamplePeakPercentOneCore": 23.97059996294723,
+  "rssStartMiB": 213.5546875,
+  "rssEndMiB": 214.0546875,
+  "rssMaxMiB": 214.0546875
+}

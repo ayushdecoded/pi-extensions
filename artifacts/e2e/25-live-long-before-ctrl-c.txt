@@ -1,0 +1,36 @@
+Atlas · atlas-5
+◐ running · depth 1 · 0 tok · $0.000
+Task: Use bash to run sleep 60, then reply exactly LIVE_CTRL_OK.
+USER
+Use bash to run sleep 60, then reply exactly LIVE_CTRL_OK.
+read-only · ↑↓/PgUp/PgDn scroll · End follow · Esc back · following
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+~/Documents/dev_shit/pi-extensions
+↑15k ↓585 R4.6k CH80.7% $0.019 (sub) 0.7%/272k                                                              gpt-5.6-luna • minimal

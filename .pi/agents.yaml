@@ -1,0 +1,29 @@
+version: 1
+defaults:
+  maxDepth: 2
+  concurrency: 10
+  timeoutMinutes: 10
+roles:
+  Atlas:
+    description: >-
+      Read-only explorer for codebase and web research, returning durable facts and where they were
+      found—not opinions, recommendations, plans, or implementation.
+    model: openai-codex/gpt-5.6-luna
+    thinking: medium
+    prompt: agents/atlas.md
+    tools: [read, bash, web_search]
+    delegates: []
+    skills: []
+    timeoutMinutes: 10
+  Vigil:
+    description: >-
+      Adversarial reviewer for consequential designs and implementation milestones, used only when
+      independent judgment could materially affect a decision or reveal a meaningful risk. Do not use
+      it for routine, directly verifiable work or merely to confirm completed work.
+    model: openai-codex/gpt-5.6-sol
+    thinking: high
+    prompt: agents/vigil.md
+    tools: [read, bash]
+    delegates: [Atlas]
+    skills: []
+    timeoutMinutes: 20

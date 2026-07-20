@@ -1,0 +1,36 @@
+Agents · 1
+✓ 1 · Atlas×1 · 1.6k tok · 24s · $0.002
+› ✓ Atlas · Use bash to run sleep 20, then reply exactly LIVE_AGENT_OK. · 1.6k tok · $0.002
+↑↓ select · Enter inspect · Esc batches
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+~/Documents/dev_shit/pi-extensions
+↑15k ↓521 R3.1k CH82.5% $0.018 (sub) 0.7%/272k                                                              gpt-5.6-luna • minimal

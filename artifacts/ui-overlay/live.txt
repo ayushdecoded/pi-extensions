@@ -1,0 +1,42 @@
+                                                                     ██╔═══╝  ██║
+                                                                     ██║      ██║
+                                                                     ╚═╝      ╚═╝
+                                                                         /tmp
+
+
+[Skills]
+  pi-internals
+
+[Prompts]
+  /create-skill, /handoff
+
+[Extensions]
+  herdr-agent-state.ts, pi-documentation.ts, src
+
+[Themes]
+  pi-blueprint
+
+
+ Call the subagent tool once with Atlas and Forge in parallel. Tell each to run bash sleep 10, make no edits, and then return exactly ROLE_OK.
+
+
+ Planning single-call parallel compliance
+
+
+ Subagents · 2
+   Atlas  gpt-5.6-luna  thinking medium   timeout 2m
+   Forge  gpt-5.6-sol   thinking low      timeout 2m
+ Subagents ◐  2 agents  Atlas×1  Forge×1  ·  0 tok  ·  13s  ·  $0.000
+ ◐  Atlas    running         13s      0 tok  $0.000
+ ◐  Forge    running         13s      0 tok  $0.000
+
+
+ ⠙ Working...
+
+Agents ◐  2 agents  Atlas×1 · Forge×1                                                                                         0 tok  ·  13s  ·  $0.000
+├─ ◐ Atlas                    running      working                                                                              13s      0 tok  $0.000
+└─ ◐ Forge                    running      working                                                                              13s      0 tok  $0.000
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑1.9k  ↓137  ·  ↳ $0.01    ◆ $0.01                                                                      codex  ·  gpt-5.6-sol  ·  medium

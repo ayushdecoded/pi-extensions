@@ -1,0 +1,36 @@
+Agents · 1
+✓ 1 · Atlas×1 · 1.7k tok · 11s · $0.002
+› ✓ ↻ #2 Atlas · Use bash to run sleep 8, then reply exactly FOLLOWUP_OK. · 1.7k tok · $0.002
+↑↓ select · Enter inspect · Esc batches
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+~/Documents/dev_shit/pi-extensions
+↑4.1k ↓143 $0.005 (sub) 0.4%/272k                                                                           gpt-5.6-luna • minimal

@@ -1,0 +1,2 @@
+my-pi-setup tool smoke
+state: edited

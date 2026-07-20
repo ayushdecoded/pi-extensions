@@ -1,0 +1,1 @@
+root=/tmp/pi-subagents-termctrl-e2e/sessions/2026-07-15T05-26-22-842Z_019f643d-8b7a-7102-9954-61e122ae7a7f.jsonl

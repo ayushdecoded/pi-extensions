@@ -1,0 +1,29 @@
+Model scope: gpt-5.6-luna, gpt-5.3-codex-spark, gpt-5.6-sol, gpt-5.6-terra (Alt+J/Alt+, to cycle)
+
+
+                                                                     ██████╗  ██╗
+                                                                     ██╔══██╗ ██║
+                                                                     ██████╔╝ ██║
+                                                                     ██╔═══╝  ██║
+                                                                     ██║      ██║
+                                                                     ╚═╝      ╚═╝
+                                                          ~/Documents/dev_shit/pi-extensions
+
+
+[Skills]
+  implementation-handoff, pi-internals, terminal-control, workflow-authoring
+
+[Prompts]
+  /handoff
+
+[Extensions]
+  src
+
+[Themes]
+  pi-blueprint
+
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+0%/272.0k  ·  ↑0 ↓0 R0  ·  ↳$0.00 ◆$0.00                                                                                      codex gpt-5.6-sol medium

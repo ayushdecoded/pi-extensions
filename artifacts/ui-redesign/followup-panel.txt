@@ -1,0 +1,44 @@
+
+
+ Call the subagent tool once with three fresh agents in parallel: Atlas, Mason, and Forge. Tell each to run bash sleep 12, make no edits, then return exactly
+ its role followed by _OK. After all finish, reply briefly.
+
+
+ Planning parallel agent calls
+
+
+ Requests · 3
+  1  Atlas  timeout 2m
+  2  Mason  timeout 2m
+  3  Forge  timeout 2m
+ Agents ✓  3 agents  Atlas×1  Mason×1  Forge×1  ·  14k tok  ·  16s  ·  $0.027
+
+ ✓  Atlas    complete        15s   3.1k tok  $0.003
+ ✓  Mason    complete        16s   5.2k tok  $0.005
+ ✓  Forge    complete        15s   5.7k tok  $0.018
+
+
+ All three agents completed successfully: Atlas_OK, Mason_OK, Forge_OK.
+
+
+ Follow up with atlas-1 only. Tell it to run bash sleep 8 and then reply exactly ATLAS_FOLLOWUP_OK. Then reply briefly.
+
+
+
+ Requests · 1
+  1  Atlas ↻  timeout 2m
+ Agents ✓  1 agents  Atlas×1  ·  3.2k tok  ·  14s  ·  $0.003
+
+ ✓  Atlas    complete        14s   3.2k tok  $0.003
+
+
+ ATLAS_FOLLOWUP_OK
+
+Agents ✓  1 agents  Atlas×1
+          3.2k tok  ·  14s  ·  $0.003
+
+… 1 older batch · /agents
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑18.4k  ↓434  CH67.2%  ·  ↳ $0.06    ◆ $0.06                                                                      codex  ·  gpt-5.6-sol  ·  medium

@@ -1,0 +1,40 @@
+{
+  "name": "my-pi-setup",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A self-contained Pi setup with native persistent subagents, prompts, web search, accounting, and TUI.",
+  "keywords": [
+    "pi-package"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/**/*.test.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ],
+    "prompts": [
+      "./.pi/prompts"
+    ]
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.80.7",
+    "@earendil-works/pi-coding-agent": "^0.80.7",
+    "@earendil-works/pi-tui": "^0.80.7",
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.4",
+    "typebox": "^1.3.6",
+    "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.80.7 <0.81.0",
+    "@earendil-works/pi-coding-agent": ">=0.80.7 <0.81.0",
+    "@earendil-works/pi-tui": ">=0.80.7 <0.81.0",
+    "typebox": "*"
+  }
+}

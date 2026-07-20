@@ -1,0 +1,40 @@
+                       [Setup]
+                         native in-process agents  ·  concurrency 10
+                         subagent  ·  web_search  ·  persistent follow-ups  ·  nested delegation
+
+                       [Commands]
+                         /agents  ·  /handoff  ·  /create-skill
+
+                       [Skills]
+                         pi-internals
+
+                       [Shortcuts]
+                         Alt+. deeper thinking  ·  Alt+, lighter thinking  ·  Alt+M next model
+
+
+ Call one fresh Forge. Tell Forge to use its subagent tool to create a fresh Atlas, ask Atlas to return exactly NESTED_ATLAS_OK, then return
+ FORGE_NESTED_OK followed by the Atlas result. Make no file edits.
+
+
+ Planning fresh Forge call with subagent
+
+
+ Subagent · Forge
+
+ Use your subagent tool to create exactly one fresh Atlas. Instruct that Atlas to return exactly `NESTED_ATLAS_OK` and nothing else. After Atlas
+ responds, return exactly two lines in this order:
+ FORGE_NESTED_OK
+ <the Atlas result>
+ Make no file edits.
+
+
+ FORGE_NESTED_OK
+ NESTED_ATLAS_OK
+
+Agents ✓  2 agents  Forge×1 · Atlas×1                                                                                       7.2k tok  ·  6s  ·  $0.021
+
+See all agent batches in /agents
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑7.1k  ↓209  CH73.6%  ·  ↳ $0.04    ◆ $0.04                                                             codex  ·  gpt-5.6-sol  ·  medium

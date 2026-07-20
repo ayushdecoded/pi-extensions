@@ -1,0 +1,40 @@
+ Switched to GPT-5.6 Terra (thinking: medium)
+
+
+ Use web_search exactly once to search for Pi coding agent GitHub. Then reply with the first result title and URL.
+
+
+
+ web_search: Pi coding agent GitHub · search
+ ## Search: Pi coding agent GitHub
+
+ - Results: 5
+
+ 1. [GitHub - earendil-works/pi: AI agent toolkit: unified LLM API, agent ...](https://github.com/earendil-works/pi)
+    - If you use Pi or other coding agents for open source work, please share your sessions. Public OSS session data helps improve coding agents with
+ real-world tasks, tool use, failures, and fixes instead of toy benchmarks.
+
+ 2. [GitHub - davidondrej/pi-agent: AI agent toolkit: coding agent CLI ...](https://github.com/davidondrej/pi-agent)
+    - Share your OSS coding agent sessions If you use pi or other coding agents for open source work, please share your sessions. Public OSS session
+ data helps improve coding agents with real-world tasks, tool use, failures, and fixes instead of toy benchmarks. For the full explanatio…
+
+ 3. [Pi Coding Agent](https://pi.dev/)
+    - A terminal-based coding agent Pi is a minimal agent harness. Adapt Pi to your workflows, not the other way around. Customize Pi with
+ extensions, skills, prompt templates, and themes. Bundle them as Pi packages and share via npm or git. Pi ships with powerful defaults but skips f…
+
+ 4. [Pi Documentation · Docs · Pi](https://pi.dev/docs/latest)
+    - A terminal-based coding agent Extensions - TypeScript modules for tools, commands, events, and custom UI. Skills - Agent Skills for reusable
+ on-demand capabilities. Prompt templates - reusable prompts that expand from slash commands. Themes - built-in and custom terminal themes.…
+
+ 5. [Providers - pi - hochej.github.io](https://hochej.github.io/pi-mono/coding-agent/providers/)
+    - Tokens are stored in ~/. pi / agent /auth.json and auto-refresh when expired. GitHub Copilot Press Enter for github .com, or enter your GitHub
+ Enterprise Server domain If you get "model not supported", enable it in VS Code: Copilot Chat → model selector → select model → "Enable"…
+
+
+ GitHub - earendil-works/pi: AI agent toolkit: unified LLM API, agent ...
+ https://github.com/earendil-works/pi
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+1%/272.0k  ·  ↑2.8k ↓77 R1.5k  ·  ↳$0.01 ◆$0.01                                                                             codex gpt-5.6-terra medium

@@ -1,0 +1,149 @@
+{
+  "node": "v26.1.0",
+  "width": 100,
+  "toolKinds": [
+    "read",
+    "bash",
+    "grep",
+    "find",
+    "ls",
+    "edit",
+    "write"
+  ],
+  "contract": {
+    "stableMessagesPrefixIdentity": true,
+    "authoritativeRunningSets": true,
+    "coldTrials": 7,
+    "warmIterations": 50,
+    "liveAndExpandTrials": 7,
+    "forcedGcForMemory": true
+  },
+  "fixtures": {
+    "800Messages": {
+      "messages": 800,
+      "nativeCalls": 400,
+      "cold": {
+        "n": 7,
+        "minMs": 357.46945000000005,
+        "medianMs": 373.7760129999997,
+        "meanMs": 378.01391785714287,
+        "p95Ms": 395.9403830000001,
+        "maxMs": 402.106225,
+        "renderedLines": 5998
+      },
+      "warm": {
+        "n": 50,
+        "minMs": 0.0005360000000109721,
+        "medianMs": 0.000555999999960477,
+        "meanMs": 0.0007774200000039854,
+        "p95Ms": 0.0008829999997033156,
+        "maxMs": 0.005808999999771913,
+        "renderedLines": 5998
+      },
+      "firstLiveTailInsertion": {
+        "n": 7,
+        "minMs": 0.6461580000004687,
+        "medianMs": 0.6679809999995996,
+        "meanMs": 0.7695084285713685,
+        "p95Ms": 0.8361850000001141,
+        "maxMs": 1.1582619999999224,
+        "renderedLines": 6003
+      },
+      "existingLivePartialUpdate": {
+        "n": 7,
+        "minMs": 0.4434609999998429,
+        "medianMs": 0.5069589999993696,
+        "meanMs": 0.5388322857141767,
+        "p95Ms": 0.555209999998624,
+        "maxMs": 0.7730929999997898,
+        "renderedLines": 6003
+      },
+      "expandAllToggle": {
+        "n": 7,
+        "minMs": 523.6324939999995,
+        "medianMs": 538.5153869999995,
+        "meanMs": 541.5530675714284,
+        "p95Ms": 547.2673749999994,
+        "maxMs": 565.8380820000002,
+        "renderedLines": 9272
+      },
+      "expandAllSteady": {
+        "n": 7,
+        "minMs": 0.008237000000008265,
+        "medianMs": 0.00892299999941315,
+        "meanMs": 0.008804857142552334,
+        "p95Ms": 0.009172999998554587,
+        "maxMs": 0.009237999998731539,
+        "renderedLines": 9272
+      }
+    },
+    "1600Messages": {
+      "messages": 1600,
+      "nativeCalls": 800,
+      "cold": {
+        "n": 7,
+        "minMs": 663.848039999999,
+        "medianMs": 671.2175229999975,
+        "meanMs": 676.3708218571422,
+        "p95Ms": 687.0954250000032,
+        "maxMs": 700.7894149999993,
+        "renderedLines": 12007
+      },
+      "warm": {
+        "n": 50,
+        "minMs": 0.00046799999836366624,
+        "medianMs": 0.00047399999675690196,
+        "meanMs": 0.0005698799999663606,
+        "p95Ms": 0.000543999998626532,
+        "maxMs": 0.00452699999732431,
+        "renderedLines": 12007
+      },
+      "firstLiveTailInsertion": {
+        "n": 7,
+        "minMs": 0.8752359999998589,
+        "medianMs": 0.9798789999986184,
+        "meanMs": 0.9850442857147884,
+        "p95Ms": 1.0672640000011597,
+        "maxMs": 1.1035460000020976,
+        "renderedLines": 12012
+      },
+      "existingLivePartialUpdate": {
+        "n": 7,
+        "minMs": 0.6976250000006985,
+        "medianMs": 0.7329239999999118,
+        "meanMs": 1.6252032857145033,
+        "p95Ms": 0.8190580000009504,
+        "maxMs": 6.9153689999984636,
+        "renderedLines": 12012
+      },
+      "expandAllToggle": {
+        "n": 7,
+        "minMs": 1069.1002899999949,
+        "medianMs": 1100.7648149999986,
+        "meanMs": 1104.7274754285697,
+        "p95Ms": 1138.117363999998,
+        "maxMs": 1161.3960709999956,
+        "renderedLines": 18548
+      },
+      "expandAllSteady": {
+        "n": 7,
+        "minMs": 0.007763000001432374,
+        "medianMs": 0.008200000003853347,
+        "meanMs": 0.008461428571276233,
+        "p95Ms": 0.008934999998018611,
+        "maxMs": 0.00983000000269385,
+        "renderedLines": 18548
+      }
+    }
+  },
+  "memory": {
+    "beforeMiB": 87.3699722290039,
+    "afterCollapsedMiB": 96.74226379394531,
+    "afterExpandedMiB": 101.38909912109375,
+    "afterDisposeMiB": 87.85405731201172,
+    "collapsedDeltaMiB": 9.372291564941406,
+    "expandedDeltaMiB": 14.019126892089844,
+    "retainedAfterDisposeMiB": 0.4840850830078125
+  },
+  "sink": 2455204
+}
