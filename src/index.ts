@@ -21,7 +21,6 @@ import type {
 } from "./config/agents.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
-import { registerLongTaskNotifications } from "./long-task-notifications.ts";
 import { SubagentRuntime } from "./runtime/runtime.ts";
 import { replayRuntimeState, SUBAGENT_ENTRY_TYPE } from "./runtime/state.ts";
 import { registerThinkingShortcuts } from "./shortcuts.ts";
@@ -69,8 +68,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerThinkingShortcuts(pi);
   registerAutoRename(pi);
   registerHandoffCommand(pi);
-  const notifyLongTask = registerLongTaskNotifications(pi);
-  registerPromptDuration(pi, undefined, notifyLongTask);
+  registerPromptDuration(pi);
   registerProactiveCompaction(pi);
   registerWebSearch(pi);
 

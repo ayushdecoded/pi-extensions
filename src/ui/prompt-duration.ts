@@ -26,11 +26,6 @@ export interface PromptDurationClock {
   clearInterval(handle: unknown): void;
 }
 
-export type PromptDurationListener = (
-  duration: PromptDurationEntryData,
-  ctx: ExtensionContext,
-) => void;
-
 type ActivePrompt = {
   startedAt: number;
   promptTimestamp: number;
@@ -55,9 +50,8 @@ const SYSTEM_CLOCK: PromptDurationClock = {
 export function registerPromptDuration(
   pi: ExtensionAPI,
   clock: PromptDurationClock = SYSTEM_CLOCK,
-  onLongPrompt?: PromptDurationListener,
 ): void {
-  const controller = new PromptDurationController(pi, clock, onLongPrompt);
+  const controller = new PromptDurationController(pi, clock);
 
   pi.registerEntryRenderer<PromptDurationEntryData>(
     PROMPT_DURATION_ENTRY_TYPE,
@@ -84,7 +78,6 @@ export class PromptDurationController {
   constructor(
     private readonly pi: ExtensionAPI,
     private readonly clock: PromptDurationClock = SYSTEM_CLOCK,
-    private readonly onLongPrompt?: PromptDurationListener,
   ) {}
 
   startSession(ctx: ExtensionContext, reconcile = false): void {
@@ -139,7 +132,6 @@ export class PromptDurationController {
       durationMs,
     };
     this.pi.appendEntry<PromptDurationEntryData>(PROMPT_DURATION_ENTRY_TYPE, data);
-    this.onLongPrompt?.(data, ctx);
   }
 
   private startLiveTimer(): void {
