@@ -32,9 +32,11 @@ import { AgentsDashboard } from "./ui/dashboard.ts";
 import { createFooterController } from "./ui/footer.ts";
 import { installHeader } from "./ui/header.ts";
 import { AgentsPanel } from "./ui/panel.ts";
+import { createEmojiAutocompleteProvider } from "./ui/emoji-autocomplete.ts";
 import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
+import { createCodexUsageController } from "./ui/codex-usage.ts";
 import registerWebSearch from "./web-search/index.ts";
 
 const WIDGET_KEY = "pi-subagents";
@@ -64,6 +66,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   let runtime: SubagentRuntime | undefined;
   let registered = false;
   const footer = createFooterController(pi);
+  const codexUsage = createCodexUsageController();
   registerPackSystemPrompt(pi);
   registerThinkingShortcuts(pi);
   registerAutoRename(pi);
@@ -114,9 +117,11 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
     installHeader(ctx, config);
     if (ctx.mode === "tui") {
+      ctx.ui.addAutocompleteProvider(createEmojiAutocompleteProvider);
       ctx.ui.setEditorComponent((tui, theme, keybindings) => new FullPasteEditor(tui, theme, keybindings));
     }
     await activate(ctx, config);
+    codexUsage.start(ctx, (remaining) => footer.setCodexWeeklyRemaining(remaining));
     if (!registered) {
       pi.registerTool(
         createSubagentTool(config, (requests, signal, onProgress) => {
@@ -155,7 +160,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     },
   });
 
-  pi.on("message_end", () => footer.requestRender(true));
+  pi.on("message_end", () => {
+    footer.requestRender(true);
+    void codexUsage.refresh();
+  });
   pi.on("turn_start", () => footer.requestRender());
   pi.on("turn_end", () => footer.requestRender());
   pi.on("tool_execution_start", () => footer.requestRender());
@@ -167,6 +175,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     ctx.ui.setWidget(WIDGET_KEY, undefined);
     ctx.ui.setFooter(undefined);
     ctx.ui.setHeader(undefined);
+    codexUsage.stop();
     footer.dispose();
     const active = runtime;
     runtime = undefined;

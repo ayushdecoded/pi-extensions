@@ -1,5 +1,6 @@
 import { CustomEditor, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
+import { getEmojiInlineReplacement } from "./emoji-autocomplete.ts";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
@@ -18,6 +19,8 @@ export class FullPasteEditor extends CustomEditor {
   }
 
   override handleInput(data: string): void {
+    if (data === ":" && this.replaceCompletedEmojiShortcode()) return;
+
     if (this.fullPasteActive) {
       this.consumePasteData(data);
       return;
@@ -34,6 +37,24 @@ export class FullPasteEditor extends CustomEditor {
     this.fullPasteActive = true;
     this.fullPasteBuffer = "";
     this.consumePasteData(data.slice(start + PASTE_START.length));
+  }
+
+  /**
+   * Keep the stock composer and its cursor state intact: remove the already
+   * typed shortcode, then insert the emoji through its normal edit path.
+   */
+  private replaceCompletedEmojiShortcode(): boolean {
+    const { line, col } = this.getCursor();
+    const textBeforeCursor = (this.getLines()[line] ?? "").slice(0, col);
+    const replacement = getEmojiInlineReplacement(`${textBeforeCursor}:`);
+    if (!replacement) return false;
+
+    // A visible completion menu owns Escape, so this only dismisses that menu;
+    // it cannot interrupt Pi while an emoji shortcode is being completed.
+    if (this.isShowingAutocomplete()) super.handleInput("\x1b");
+    for (let index = 0; index < replacement.replaceLen - 1; index++) super.handleInput("\x7f");
+    super.handleInput(replacement.insert);
+    return true;
   }
 
   private consumePasteData(data: string): void {

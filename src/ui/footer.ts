@@ -5,6 +5,7 @@ import { footerUsageTotals } from "./accounting.ts";
 
 export type FooterController = {
   install(ctx: ExtensionContext, runtime: SubagentRuntime): void;
+  setCodexWeeklyRemaining(remaining: number | undefined): void;
   requestRender(accountingChanged?: boolean): void;
   dispose(): void;
 };
@@ -13,6 +14,7 @@ export function createFooterController(pi: ExtensionAPI): FooterController {
   let render: (() => void) | undefined;
   let invalidateAccounting: (() => void) | undefined;
   let disposeRuntime: (() => void) | undefined;
+  let codexWeeklyRemaining: number | undefined;
 
   return {
     install(ctx, runtime) {
@@ -65,11 +67,15 @@ export function createFooterController(pi: ExtensionAPI): FooterController {
               tokens: tokenLabel(totals.leaf, totals.cacheHit, theme),
               costs: costLabel(totals.leaf.cost, totals.tree.cost, theme),
             };
-            const right = modelLabel(ctx, pi.getThinkingLevel(), theme);
+            const right = modelLabel(ctx, pi.getThinkingLevel(), theme, codexWeeklyRemaining);
             return [responsiveLine(segments, right, width, theme)];
           },
         };
       });
+    },
+    setCodexWeeklyRemaining(remaining) {
+      codexWeeklyRemaining = remaining;
+      render?.();
     },
     requestRender(accountingChanged = false) {
       if (accountingChanged) invalidateAccounting?.();
@@ -125,11 +131,14 @@ export function costLabel(leaf: number, tree: number, theme: Theme): string {
   ].join("    ");
 }
 
-export function modelLabel(ctx: ExtensionContext, thinking: string, theme: Theme): string {
+export function modelLabel(ctx: ExtensionContext, thinking: string, theme: Theme, codexWeeklyRemaining?: number): string {
   const provider = shortProvider(ctx.model?.provider ?? "");
   const model = shortModel(ctx.model?.id ?? "no-model");
+  const providerLabel = provider === "codex"
+    ? codexProviderLabel(codexWeeklyRemaining, theme)
+    : provider ? theme.fg("dim", provider) : "";
   return [
-    provider ? theme.fg("dim", provider) : "",
+    providerLabel,
     theme.bold(theme.fg("accent", model)),
     theme.fg(thinkingColor(thinking), thinking),
   ]
@@ -194,6 +203,15 @@ function thinkingColor(thinking: string): ThemeColor {
     high: "thinkingHigh", xhigh: "thinkingXhigh", max: "thinkingMax",
   };
   return colors[key] ?? "muted";
+}
+
+function codexProviderLabel(remaining: number | undefined, theme: Theme): string {
+  const text = `codex [${remaining === undefined ? "?" : `${Math.round(remaining)}%`}]`;
+  if (remaining === undefined) return theme.fg("dim", text);
+  if (remaining >= 60) return theme.fg("success", text);
+  if (remaining >= 40) return theme.fg("warning", text);
+  if (remaining >= 20) return `\x1b[38;5;208m${text}\x1b[39m`;
+  return theme.fg("error", text);
 }
 
 function shortProvider(provider: string): string {

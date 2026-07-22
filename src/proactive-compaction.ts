@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, SessionBeforeCompactEvent, TurnEndEvent } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from "@earendil-works/pi-coding-agent";
 
 export const COMPACTION_PERCENT = 85;
 const CONTINUATION_TYPE = "proactive-compaction-continuation";
@@ -27,11 +27,12 @@ export function registerProactiveCompaction(pi: ExtensionAPI): void {
     });
   });
 
-  // Pi's configured reserve is token-based. Suppress its earlier threshold
-  // compactions so the 85% policy remains correct for every model window.
-  pi.on("session_before_compact", (event, ctx) => {
-    if (event.reason !== "threshold") return;
-    if (!shouldAllowThresholdCompaction(event, ctx)) return { cancel: true };
+  // This extension owns threshold scheduling. Letting Pi's native threshold
+  // compaction proceed at 85% races the ctx.compact() call above: both can
+  // prepare the same context, then either compact twice or make one fail.
+  // Manual compaction and overflow recovery remain native Pi behavior.
+  pi.on("session_before_compact", (event) => {
+    if (event.reason === "threshold") return { cancel: true };
   });
 }
 
@@ -39,10 +40,4 @@ export function shouldCompactActiveTurn(event: TurnEndEvent, ctx: ExtensionConte
   if (event.toolResults.length === 0) return false;
   const percent = ctx.getContextUsage()?.percent;
   return percent !== null && percent !== undefined && percent >= COMPACTION_PERCENT;
-}
-
-export function shouldAllowThresholdCompaction(event: SessionBeforeCompactEvent, ctx: ExtensionContext): boolean {
-  const contextWindow = ctx.model?.contextWindow;
-  if (!contextWindow || contextWindow <= 0) return true;
-  return event.preparation.tokensBefore / contextWindow * 100 >= COMPACTION_PERCENT;
 }

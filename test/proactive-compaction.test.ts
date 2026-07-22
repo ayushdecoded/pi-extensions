@@ -4,7 +4,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   COMPACTION_PERCENT,
   registerProactiveCompaction,
-  shouldAllowThresholdCompaction,
   shouldCompactActiveTurn,
 } from "../src/proactive-compaction.ts";
 
@@ -23,11 +22,17 @@ test("only active tool-loop turns compact at the 85 percent boundary", () => {
   assert.equal(shouldCompactActiveTurn(toolTurn, context(null)), false);
 });
 
-test("native threshold compaction is deferred until 85 percent for each model window", () => {
-  const event = (tokensBefore: number) => ({ preparation: { tokensBefore } }) as any;
-  assert.equal(shouldAllowThresholdCompaction(event(230_000), context(0, 272_000)), false);
-  assert.equal(shouldAllowThresholdCompaction(event(231_200), context(0, 272_000)), true);
-  assert.equal(shouldAllowThresholdCompaction(event(108_800), context(0, 128_000)), true);
+test("native threshold compaction is always suppressed without blocking manual or overflow compaction", () => {
+  const handlers = new Map<string, Function>();
+  const pi = {
+    on(event: string, handler: Function) { handlers.set(event, handler); },
+  } as unknown as ExtensionAPI;
+  registerProactiveCompaction(pi);
+
+  const beforeCompact = handlers.get("session_before_compact")!;
+  assert.deepEqual(beforeCompact({ reason: "threshold" }, context(99)), { cancel: true });
+  assert.equal(beforeCompact({ reason: "manual" }, context(99)), undefined);
+  assert.equal(beforeCompact({ reason: "overflow" }, context(99)), undefined);
 });
 
 test("successful proactive compaction queues one hidden continuation", () => {
