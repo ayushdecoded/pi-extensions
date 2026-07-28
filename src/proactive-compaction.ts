@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from "@earendil-works/pi-coding-agent";
 
 export const COMPACTION_PERCENT = 85;
-const CONTINUATION_TYPE = "proactive-compaction-continuation";
+export const PROACTIVE_COMPACTION_CONTINUATION_TYPE = "proactive-compaction-continuation";
 const CONTINUATION_INSTRUCTION = "Continue the active task from the compacted context. Do not stop merely because compaction occurred; complete the work that was in progress.";
 
 /**
@@ -19,7 +19,7 @@ export function registerProactiveCompaction(pi: ExtensionAPI): void {
       onComplete: () => {
         compacting = false;
         pi.sendMessage(
-          { customType: CONTINUATION_TYPE, content: CONTINUATION_INSTRUCTION, display: false },
+          { customType: PROACTIVE_COMPACTION_CONTINUATION_TYPE, content: CONTINUATION_INSTRUCTION, display: false },
           { triggerTurn: true, deliverAs: "followUp" },
         );
       },

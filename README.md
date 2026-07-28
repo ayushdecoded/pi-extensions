@@ -73,7 +73,7 @@ Independent array items execute concurrently. `timeoutMinutes` may be omitted to
 
 Use `/handoff [optional next goal]` to transfer the recorded work into a fresh parent-linked session. The command runs a normal main-agent summary turn with the existing tools and subagent orchestration available, waits for it to settle, and opens the generated chronological handoff for review. Accepting the review creates the new session and places the edited handoff in its editor; it is never submitted automatically. With no argument, the handoff continues the current work from its present state. For unusually large, compacted, or incomplete histories, the agent may use read-only Atlas subagents to inspect the saved session history.
 
-Use `/create-skill [request]` for an evidence-driven interview followed by creation of a concise project-local Pi skill.
+Use `/create-skill [request]` for an evidence-driven interview followed by creation of a concise project-local Pi skill. Use `/save-md` to save the latest completed assistant response as Markdown in the gitignored `AgentDocs/` directory, with a Spark-generated filename.
 
 ## Web search
 

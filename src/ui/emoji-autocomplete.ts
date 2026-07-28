@@ -5,6 +5,9 @@ type EmojiEntry = readonly [name: string, emoji: string];
 type EmojiBuckets = Readonly<Record<string, readonly EmojiEntry[]>>;
 
 const EMOJIS = emojiBuckets as unknown as EmojiBuckets;
+const ALL_EMOJI_ENTRIES: readonly EmojiEntry[] = Object.values(EMOJIS)
+  .flat()
+  .sort(([left], [right]) => left.localeCompare(right));
 const MAX_SUGGESTIONS = 12;
 
 export type EmojiInlineReplacement = { replaceLen: number; insert: string };
@@ -51,16 +54,29 @@ function extractShortcode(textBeforeCursor: string): { prefix: string; name: str
 
 export function getEmojiSuggestions(textBeforeCursor: string): AutocompleteSuggestions | null {
   const shortcode = extractShortcode(textBeforeCursor);
-  if (!shortcode || shortcode.name.length === 0) return null;
-
-  const entries = EMOJIS[shortcode.name[0]!];
-  if (!entries) return null;
+  if (!shortcode) return null;
 
   const items: AutocompleteItem[] = [];
-  for (let index = lowerBound(entries, shortcode.name); index < entries.length && items.length < MAX_SUGGESTIONS; index++) {
-    const [name, emoji] = entries[index]!;
-    if (!name.startsWith(shortcode.name)) break;
-    items.push({ value: emoji, label: `${emoji}  :${name}:` });
+  if (shortcode.name.length === 0) {
+    // Return the full local list so the TUI's SelectList can scroll through it.
+    // The list only renders its configured visible window, so this does not
+    // make the autocomplete popup thousands of rows tall.
+    for (const [name, emoji] of ALL_EMOJI_ENTRIES) {
+      items.push({ value: emoji, label: `${emoji}  :${name}:` });
+    }
+  } else {
+    const entries = EMOJIS[shortcode.name[0]!];
+    if (!entries) return null;
+
+    for (
+      let index = lowerBound(entries, shortcode.name);
+      index < entries.length && items.length < MAX_SUGGESTIONS;
+      index++
+    ) {
+      const [name, emoji] = entries[index]!;
+      if (!name.startsWith(shortcode.name)) break;
+      items.push({ value: emoji, label: `${emoji}  :${name}:` });
+    }
   }
 
   return items.length > 0 ? { items, prefix: shortcode.prefix } : null;

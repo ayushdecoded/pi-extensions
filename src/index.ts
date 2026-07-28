@@ -21,6 +21,7 @@ import type {
 } from "./config/agents.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
+import { registerSaveMarkdown } from "./save-md.ts";
 import { SubagentRuntime } from "./runtime/runtime.ts";
 import { replayRuntimeState, SUBAGENT_ENTRY_TYPE } from "./runtime/state.ts";
 import { registerThinkingShortcuts } from "./shortcuts.ts";
@@ -70,6 +71,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerPackSystemPrompt(pi);
   registerThinkingShortcuts(pi);
   registerAutoRename(pi);
+  registerSaveMarkdown(pi);
   registerHandoffCommand(pi);
   registerPromptDuration(pi);
   registerProactiveCompaction(pi);

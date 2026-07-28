@@ -7,6 +7,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { PROACTIVE_COMPACTION_CONTINUATION_TYPE } from "../proactive-compaction.ts";
 
 export const PROMPT_DURATION_ENTRY_TYPE = "prompt-duration";
 export const PROMPT_DURATION_MINIMUM_MS = 60_000;
@@ -64,7 +65,11 @@ export function registerPromptDuration(
 
   pi.on("session_start", (event, ctx) => controller.startSession(ctx, event.reason === "reload"));
   pi.on("message_start", (event, ctx) => {
-    if (event.message.role === "user") controller.startPrompt(event.message.timestamp, ctx);
+    if (
+      event.message.role !== "user" ||
+      (event.message as { customType?: unknown }).customType === PROACTIVE_COMPACTION_CONTINUATION_TYPE
+    ) return;
+    controller.startPrompt(event.message.timestamp, ctx);
   });
   pi.on("agent_settled", (_event, ctx) => controller.settlePrompt(ctx));
   pi.on("session_shutdown", (_event, ctx) => controller.stopSession(ctx));

@@ -87,6 +87,44 @@ test("entry renderer hides sub-minute completions and renders durable long ones"
   assert.match(component.render(60)[0], /Zipped for 1m 00s/);
 });
 
+test("proactive compaction continuation preserves the active prompt timer", () => {
+  const clock = new FakeClock();
+  const harness = createHarness(clock);
+  const handlers = new Map<string, Function[]>();
+  const pi = {
+    ...harness.pi,
+    registerEntryRenderer() {},
+    on(event: string, handler: Function) {
+      const listeners = handlers.get(event) ?? [];
+      listeners.push(handler);
+      handlers.set(event, listeners);
+    },
+  } as unknown as ExtensionAPI;
+  registerPromptDuration(pi, clock);
+
+  handlers.get("session_start")![0]!({ reason: "startup" }, harness.ctx);
+  handlers.get("message_start")![0]!({ message: { role: "user", timestamp: 0 } }, harness.ctx);
+  harness.branch.push(userEntry("user-a", 0));
+  clock.time = 120_000;
+
+  handlers.get("message_start")![0]!({
+    message: { role: "user", customType: "proactive-compaction-continuation", timestamp: 120_000 },
+  }, harness.ctx);
+  assert.equal(harness.durations.length, 0);
+  clock.tick();
+  assert.match(harness.working.at(-1) ?? "", /Zipping.*2m 00s/);
+
+  clock.time = 180_000;
+  handlers.get("agent_settled")![0]!({}, harness.ctx);
+  assert.deepEqual(harness.durations, [{
+    version: 1,
+    promptEntryId: "user-a",
+    startedAt: 0,
+    completedAt: 180_000,
+    durationMs: 180_000,
+  }]);
+});
+
 test("queued prompts receive independent user-perceived timers and dividers", () => {
   const clock = new FakeClock();
   const harness = createHarness(clock);

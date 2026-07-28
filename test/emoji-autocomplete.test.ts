@@ -8,12 +8,21 @@ import {
   getEmojiSuggestions,
 } from "../src/ui/emoji-autocomplete.ts";
 
+test("shows the full emoji list at a bare colon and filters as text is typed", () => {
+  const allSuggestions = getEmojiSuggestions("hello :");
+  assert.ok(allSuggestions);
+  assert.equal(allSuggestions.prefix, ":");
+  assert.ok(allSuggestions.items.length > 12);
+  assert.ok(allSuggestions.items.some((item) => item.label.includes(":smile:")));
+
+  const filteredSuggestions = getEmojiSuggestions("hello :smi");
+  assert.ok(filteredSuggestions);
+  assert.equal(filteredSuggestions.prefix, ":smi");
+  assert.ok(filteredSuggestions.items.some((item) => item.label.includes(":smile:")));
+  assert.ok(filteredSuggestions.items.length <= 12);
+});
+
 test("suggests emoji shortcodes only at token boundaries", () => {
-  const suggestions = getEmojiSuggestions("hello :smi");
-  assert.ok(suggestions);
-  assert.equal(suggestions.prefix, ":smi");
-  assert.ok(suggestions.items.some((item) => item.label.includes(":smile:")));
-  assert.ok(suggestions.items.length <= 12);
   assert.equal(getEmojiSuggestions("https://example.test/:smi"), null);
   assert.equal(getEmojiSuggestions("word:smile"), null);
 });

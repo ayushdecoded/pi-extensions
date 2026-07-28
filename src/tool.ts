@@ -6,7 +6,7 @@ import type { BatchResult, SubagentRequest } from "./runtime/types.ts";
 import { roleText } from "./ui/roles.ts";
 
 const TOOL_DESCRIPTION =
-  "Use subagents only for well-scoped, verifiable work when a separate context justifies its coordination cost: substantial bounded execution, specialization, independent judgment, or genuinely independent parallel work. Keep routine execution, inspection, and directly verifiable validation in the main session; do not delegate merely for confirmation or extra confidence. Do not delegate small tasks, reflexive exploration, or fragments that would repeat the same discovery. Treat each fresh agent as an empty slate with no knowledge of your conversation, prior work, decisions, or sibling results. Give it high-quality instructions and high-quality context so it can act without rediscovery: the objective, established evidence and relevant paths or symbols, completed work, decisions and rationale, constraints, boundaries, expected result, and an explicit stop condition defining when to return. For multiple agents, provide the shared baseline and distinct responsibilities; duplicate work only for intentional independent verification. Resume an agent when its context remains useful, and coordinate and integrate all results yourself.";
+  "Delegate only bounded, verifiable work when specialization, independent judgment, substantial execution, or independent parallelism justifies coordination. Keep routine execution, inspection, directly verifiable validation, small tasks, and repeated discovery in the main session; do not delegate merely for confirmation or extra confidence. Fresh agents have no context. Include the objective, evidence, paths and symbols, completed work, decisions and rationale, constraints, boundaries, expected result, and stop condition. For parallel calls, share baseline context and assign distinct responsibilities; duplicate only for intentional verification. Resume useful contexts and integrate results yourself.";
 
 export type SubagentExecutor = (requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void) => Promise<BatchResult>;
 
@@ -21,7 +21,7 @@ export function createSubagentTool(config: AgentsConfig, executeBatch: SubagentE
     Type.Integer({
       minimum: -1,
       description:
-        "Omit for the configured default; use a positive number of minutes to override it, or -1 for no timeout.",
+        "Minutes; omit for default, -1 for no timeout.",
     }),
   );
   const fresh = Type.Object(
@@ -29,7 +29,7 @@ export function createSubagentTool(config: AgentsConfig, executeBatch: SubagentE
       role: roleSchema,
       task: Type.String({
         minLength: 1,
-        description: "Self-contained durable context, bounded objective, expected result, and explicit stop condition.",
+        description: "Context, objective, result, and stop condition.",
       }),
       timeoutMinutes: timeout,
     },
@@ -43,7 +43,7 @@ export function createSubagentTool(config: AgentsConfig, executeBatch: SubagentE
       }),
       task: Type.String({
         minLength: 1,
-        description: "Relevant new context, bounded objective, expected result, and explicit stop condition for this follow-up.",
+        description: "New context, objective, result, and stop condition.",
       }),
       timeoutMinutes: timeout,
     },

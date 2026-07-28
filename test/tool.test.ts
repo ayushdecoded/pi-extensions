@@ -38,7 +38,7 @@ test("tool schema derives role names and descriptions without exposing runtime d
   assert.match(schema, /Scout/);
   assert.match(schema, /Focused exploration/);
   assert.match(schema, /Builder/);
-  assert.match(schema, /positive number of minutes to override it/);
+  assert.match(schema, /Minutes; omit for default, -1 for no timeout/);
   assert.doesNotMatch(`${tool.description}\n${schema}`, /maxDepth|remaining depth|depth available|smaller positive|maximum timeout/i);
 });
 
@@ -78,17 +78,17 @@ test("tool execution keeps prompts out of model-facing results and emits no dupl
 test("tool guidance defines bounded empty-slate delegation", () => {
   const tool = createSubagentTool(config, async () => ({ batchId: "batch", runs: [], allRuns: [], durationMs: 0 }));
   const schema = JSON.stringify(tool.parameters);
-  assert.match(tool.description, /only for well-scoped, verifiable work when a separate context justifies its coordination cost/);
-  assert.match(tool.description, /substantial bounded execution/);
-  assert.match(tool.description, /Do not delegate small tasks, reflexive exploration/);
-  assert.match(tool.description, /fresh agent as an empty slate/);
-  assert.match(tool.description, /high-quality instructions and high-quality context/);
-  assert.match(tool.description, /explicit stop condition defining when to return/);
-  assert.match(tool.description, /shared baseline and distinct responsibilities/);
-  assert.match(tool.description, /routine execution, inspection, and directly verifiable validation/);
+  assert.match(tool.description, /bounded, verifiable work/);
+  assert.match(tool.description, /specialization, independent judgment, substantial execution/);
+  assert.match(tool.description, /small tasks, and repeated discovery/);
+  assert.match(tool.description, /Fresh agents have no context/);
+  assert.match(tool.description, /objective, evidence, paths and symbols/);
+  assert.match(tool.description, /stop condition/);
+  assert.match(tool.description, /share baseline context and assign distinct responsibilities/);
+  assert.match(tool.description, /routine execution, inspection, directly verifiable validation/);
   assert.match(tool.description, /do not delegate merely for confirmation or extra confidence/);
-  assert.match(tool.description, /intentional independent verification/);
-  assert.match(tool.description, /Resume an agent when its context remains useful/);
-  assert.match(schema, /Self-contained durable context, bounded objective, expected result, and explicit stop condition/);
-  assert.match(schema, /Relevant new context, bounded objective, expected result, and explicit stop condition/);
+  assert.match(tool.description, /intentional verification/);
+  assert.match(tool.description, /Resume useful contexts and integrate results yourself/);
+  assert.match(schema, /Context, objective, result, and stop condition/);
+  assert.match(schema, /New context, objective, result, and stop condition/);
 });
