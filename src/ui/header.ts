@@ -81,7 +81,7 @@ export function installHeader(ctx: ExtensionContext, config: AgentsConfig, comma
     // Pi has already resolved skills from every supported source before session_start.
     // Read its effective prompt rather than duplicating its discovery rules here.
     skills: discoverAvailableSkills(ctx.getSystemPrompt()),
-    prompts: discoverResourceNames(commands, "prompt", "/"),
+    prompts: discoverResourceNames(commands, "prompt"),
     extensions: discoverExtensionNames(commands),
     themes: ctx.ui.getAllThemes().map((theme) => theme.name).sort(),
     configFile: formatResourcePath(config.path, ctx.cwd),
