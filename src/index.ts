@@ -117,7 +117,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    installHeader(ctx, config);
+    installHeader(ctx, config, pi.getCommands());
     if (ctx.mode === "tui") {
       ctx.ui.addAutocompleteProvider(createEmojiAutocompleteProvider);
       ctx.ui.setEditorComponent((tui, theme, keybindings) => new FullPasteEditor(tui, theme, keybindings));

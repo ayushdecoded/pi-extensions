@@ -52,6 +52,9 @@ export type HeaderInfo = {
   agents: Array<{ name: string; model: string; thinking: string }>;
   concurrency: number;
   skills: string[];
+  prompts?: string[];
+  extensions?: string[];
+  themes?: string[];
   configFile: string;
   contextFiles: string[];
 };
@@ -62,7 +65,7 @@ type DisplaySection = {
   meta?: string;
 };
 
-export function installHeader(ctx: ExtensionContext, config: AgentsConfig): void {
+export function installHeader(ctx: ExtensionContext, config: AgentsConfig, commands: readonly { name: string; source: string; sourceInfo: { source: string } }[]): void {
   if (ctx.mode !== "tui") return;
   const title = formatDirectory(ctx.cwd);
   const info: HeaderInfo = {
@@ -78,6 +81,9 @@ export function installHeader(ctx: ExtensionContext, config: AgentsConfig): void
     // Pi has already resolved skills from every supported source before session_start.
     // Read its effective prompt rather than duplicating its discovery rules here.
     skills: discoverAvailableSkills(ctx.getSystemPrompt()),
+    prompts: discoverResourceNames(commands, "prompt", "/"),
+    extensions: discoverExtensionNames(commands),
+    themes: ctx.ui.getAllThemes().map((theme) => theme.name).sort(),
     configFile: formatResourcePath(config.path, ctx.cwd),
     contextFiles: discoverContextFiles(ctx.cwd, ctx.isProjectTrusted()),
   };
@@ -133,18 +139,28 @@ export function renderHeader(title: string, width: number, info?: HeaderInfo, th
   const context: DisplaySection = { name: "CONTEXT", rows: contextRows };
   const commands: DisplaySection = { name: "COMMANDS", rows: commandRows };
   const skills: DisplaySection = { name: "SKILLS", rows: skillRows };
+  const prompts: DisplaySection = { name: "PROMPTS", rows: resourceRows(info.prompts ?? [], "/") };
+  const extensions: DisplaySection = { name: "EXTENSIONS", rows: resourceRows(info.extensions ?? []) };
+  const themes: DisplaySection = { name: "THEMES", rows: resourceRows(info.themes ?? []) };
   const shortcuts: DisplaySection = { name: "SHORTCUTS", rows: shortcutRows };
 
   if (width >= 96) {
     lines.push(...pairedSections(agents, context, width), "");
     lines.push(...pairedSections(commands, skills, width), "");
-    lines.push(...singleSection(shortcuts, width), "");
+    lines.push(...pairedSections(prompts, extensions, width), "");
+    lines.push(...pairedSections(themes, shortcuts, width), "");
   } else {
-    for (const section of [agents, context, commands, skills, shortcuts]) {
+    for (const section of [agents, context, commands, skills, prompts, extensions, themes, shortcuts]) {
       lines.push(...singleSection(section, width), "");
     }
   }
   return lines;
+}
+
+function resourceRows(items: string[], prefix = ""): string[] {
+  return items.length
+    ? items.map((item) => `${foreground([116, 139, 171], "◇")}  ${foreground([151, 174, 204], `${prefix}${item}`)}`)
+    : [foreground([116, 139, 171], "No loaded resources")];
 }
 
 function agentRow(agent: HeaderInfo["agents"][number], theme?: Theme): string {
@@ -208,6 +224,18 @@ function discoverContextFiles(cwd: string, trusted: boolean): string[] {
     ...loadProjectContextFiles({ cwd, agentDir }).map((file) => file.path),
   ];
   return [...new Set(files.map((file) => formatResourcePath(file, cwd)))];
+}
+
+function discoverResourceNames(
+  commands: readonly { name: string; source: string }[],
+  source: "prompt" | "skill",
+  prefix = "",
+): string[] {
+  return [...new Set(commands.filter((command) => command.source === source).map((command) => `${prefix}${command.name}`))].sort();
+}
+
+function discoverExtensionNames(commands: readonly { name: string; source: string; sourceInfo: { source: string } }[]): string[] {
+  return [...new Set(commands.filter((command) => command.source === "extension").map((command) => command.sourceInfo.source))].sort();
 }
 
 export function discoverAvailableSkills(systemPrompt: string): string[] {
