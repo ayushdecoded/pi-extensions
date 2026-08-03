@@ -38,6 +38,7 @@ import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
 import { createCodexUsageController } from "./ui/codex-usage.ts";
+import { createPainterTool } from "./painter.ts";
 import registerWebSearch from "./web-search/index.ts";
 
 const WIDGET_KEY = "pi-subagents";
@@ -76,6 +77,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerPromptDuration(pi);
   registerProactiveCompaction(pi);
   registerWebSearch(pi);
+  pi.registerTool(createPainterTool());
 
   const activate = async (ctx: ExtensionContext, config: AgentsConfig): Promise<void> => {
     const previous = runtime;
