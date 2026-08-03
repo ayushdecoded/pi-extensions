@@ -79,7 +79,7 @@ test("tool guidance defines bounded empty-slate delegation", () => {
   const tool = createSubagentTool(config, async () => ({ batchId: "batch", runs: [], allRuns: [], durationMs: 0 }));
   const schema = JSON.stringify(tool.parameters);
   assert.match(tool.description, /bounded, verifiable work/);
-  assert.match(tool.description, /specialization, independent judgment, substantial execution/);
+  assert.match(tool.description, /specialization, independent judgment, or independent parallelism/);
   assert.match(tool.description, /small tasks, and repeated discovery/);
   assert.match(tool.description, /Fresh agents have no context/);
   assert.match(tool.description, /objective, evidence, paths and symbols/);

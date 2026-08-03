@@ -6,8 +6,8 @@ defaults:
 roles:
   Atlas:
     description: >-
-      Read-only explorer for codebase and web research, returning durable facts and where they were
-      found—not opinions, recommendations, plans, or implementation.
+      Read-only codebase and web researcher. Use for focused fact-finding; provide the question,
+      relevant context, and expected evidence. Not for opinions, recommendations, plans, or implementation.
     model: openai-codex/gpt-5.6-luna
     thinking: medium
     prompt: agents/atlas.md
@@ -17,9 +17,10 @@ roles:
     timeoutMinutes: 10
   Vigil:
     description: >-
-      Adversarial reviewer for consequential designs and implementation milestones, used only when
-      independent judgment could materially affect a decision or reveal a meaningful risk. Do not use
-      it for routine, directly verifiable work or merely to confirm completed work.
+      Adversarial advisor for consequential architecture, designs, and implementation milestones. Use when
+      independent judgment could materially affect a decision or expose a meaningful risk; provide goals,
+      non-goals, constraints, decision rationale, options under consideration, review scope, and relevant code.
+      Not for routine checks or confirmation of completed work.
     model: openai-codex/gpt-5.6-sol
     thinking: high
     prompt: agents/vigil.md

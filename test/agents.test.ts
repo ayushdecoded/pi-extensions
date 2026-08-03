@@ -104,10 +104,10 @@ test("uses bundled package defaults only when project and global configs are abs
   const atlas = config.roles.find((role) => role.name === "Atlas");
   const vigil = config.roles.find((role) => role.name === "Vigil");
   assert.deepEqual(atlas?.tools, ["read", "bash", "web_search"]);
-  assert.match(atlas?.description ?? "", /codebase and web research.*durable facts/);
-  assert.match(vigil?.description ?? "", /consequential designs and implementation milestones/);
-  assert.match(vigil?.description ?? "", /materially affect a decision or reveal a meaningful risk/);
-  assert.match(vigil?.description ?? "", /routine, directly verifiable work or merely to confirm completed work/);
+  assert.match(atlas?.description ?? "", /focused fact-finding.*expected evidence/);
+  assert.match(vigil?.description ?? "", /consequential architecture, designs, and implementation milestones/);
+  assert.match(vigil?.description ?? "", /materially affect a decision or expose a meaningful risk/);
+  assert.match(vigil?.description ?? "", /Not for routine checks or confirmation of completed work/);
 });
 
 function delegationConfig(delegates: unknown): unknown {
