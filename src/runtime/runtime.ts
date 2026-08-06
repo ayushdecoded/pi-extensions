@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   createAgentSession,
   getAgentDir,
+  ModelRuntime,
   SessionManager,
   type AgentSession,
   type SessionStats,
@@ -69,6 +70,8 @@ export class SubagentRuntime {
   private readonly invocationCancels = new Set<(reason?: unknown) => void>();
   private readonly pendingInvocations = new Set<Promise<InvocationResult>>();
   private readonly headingControllers = new Set<AbortController>();
+  private modelRuntime?: ModelRuntime;
+  private modelRuntimePromise?: Promise<ModelRuntime>;
   private disposed = false;
 
   constructor(readonly options: RuntimeOptions, initialState?: RuntimeState) {
@@ -80,6 +83,21 @@ export class SubagentRuntime {
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /**
+   * One shared model/auth runtime for the whole delegation tree, lazily bound
+   * to the same agentDir auth.json/models.json the host session uses.
+   */
+  private async getModelRuntime(): Promise<ModelRuntime> {
+    if (!this.modelRuntimePromise) {
+      const agentDir = getAgentDir();
+      this.modelRuntimePromise = ModelRuntime.create({
+        authPath: path.join(agentDir, "auth.json"),
+        modelsPath: path.join(agentDir, "models.json"),
+      });
+    }
+    return this.modelRuntimePromise;
   }
 
   subscribeTranscript(listener: (handle: string, revision: number) => void): () => void {
@@ -294,8 +312,7 @@ export class SubagentRuntime {
       const created = await createAgentSession({
         cwd: this.options.cwd,
         agentDir: getAgentDir(),
-        authStorage: this.options.modelRegistry.authStorage,
-        modelRegistry: this.options.modelRegistry,
+        modelRuntime: await this.getModelRuntime(),
         model,
         thinkingLevel: resolved.role.thinking,
         tools,

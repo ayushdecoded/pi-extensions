@@ -3,6 +3,7 @@ import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 
@@ -123,7 +124,7 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
   });
 }
 
-async function codexAuth(ctx: ExtensionContext): Promise<{ apiKey: string; headers?: Record<string, string> }> {
+async function codexAuth(ctx: ExtensionContext): Promise<{ apiKey: string; headers?: ProviderHeaders }> {
   const model = ctx.model?.provider === "openai-codex"
     ? ctx.model
     : ctx.modelRegistry.getAll().find((candidate) => candidate.provider === "openai-codex");
@@ -133,7 +134,7 @@ async function codexAuth(ctx: ExtensionContext): Promise<{ apiKey: string; heade
   return { apiKey: auth.apiKey, headers: auth.headers };
 }
 
-function codexHeaders(apiKey: string, authHeaders: Record<string, string> | undefined, toolCallId: string): Record<string, string> {
+function codexHeaders(apiKey: string, authHeaders: ProviderHeaders | undefined, toolCallId: string): Record<string, string> {
   const headers: Record<string, string> = {
     "Authorization": `Bearer ${apiKey}`,
     "Accept": "application/json",
@@ -141,8 +142,12 @@ function codexHeaders(apiKey: string, authHeaders: Record<string, string> | unde
     "OpenAI-Beta": "codex-1",
     "originator": "Pi",
     "x-codex-image-turn-id": toolCallId,
-    ...authHeaders,
   };
+  // Null values are header-deletion markers: drop them rather than sending
+  // them to fetch (which would serialize null as the literal string "null").
+  for (const [name, value] of Object.entries(authHeaders ?? {})) {
+    if (value !== null) headers[name] = value;
+  }
   if (!header(headers, "ChatGPT-Account-ID")) {
     const accountId = accountIdFromToken(apiKey);
     if (accountId) headers["ChatGPT-Account-ID"] = accountId;

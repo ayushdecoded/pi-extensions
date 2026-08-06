@@ -1,6 +1,7 @@
 import { open, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { complete } from "@earendil-works/pi-ai/compat";
+import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 
 const MODEL_PROVIDER = "openai-codex";
@@ -81,7 +82,7 @@ export function normalizeFilename(value: string | undefined): string | undefined
   return stem ? `${stem}.md` : undefined;
 }
 
-async function generateFilename(response: string, model: any, auth: { apiKey: string; headers?: Record<string, string>; env?: Record<string, string> }, signal?: AbortSignal): Promise<string | undefined> {
+async function generateFilename(response: string, model: any, auth: { apiKey: string; headers?: ProviderHeaders; env?: Record<string, string> }, signal?: AbortSignal): Promise<string | undefined> {
   const result = await complete(
     model,
     {
