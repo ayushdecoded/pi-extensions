@@ -11,6 +11,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { AgentRole } from "../config/agents.ts";
+import { resolvePreset } from "../config/agents.ts";
+import { defaultModeName } from "../config/mode.ts";
 import { createSubagentTool } from "../tool.ts";
 import { createWebSearchTool } from "../web-search/index.ts";
 import { CapacityLease, CapacityScheduler } from "./scheduler.ts";
@@ -73,11 +75,50 @@ export class SubagentRuntime {
   private modelRuntime?: ModelRuntime;
   private modelRuntimePromise?: Promise<ModelRuntime>;
   private disposed = false;
+  private activeModeValue: string | undefined;
+  private effectiveRoles: AgentRole[];
 
   constructor(readonly options: RuntimeOptions, initialState?: RuntimeState) {
     this.scheduler = new CapacityScheduler(options.config.defaults.concurrency);
     this.state = initialState ?? emptyRuntimeState();
     this.reservedHandles = new Set(options.reservedHandles ?? this.state.agents.keys());
+    this.activeModeValue = options.activeMode ?? defaultModeName(options.config);
+    this.effectiveRoles = this.resolveRoles(this.activeModeValue);
+  }
+
+  /** The canonical name of the active preset, or undefined when no preset is active. */
+  get activeMode(): string | undefined {
+    return this.activeModeValue;
+  }
+
+  /** The roles the active preset activates, with overrides applied. */
+  get activeRoles(): readonly AgentRole[] {
+    return this.effectiveRoles;
+  }
+
+  /**
+   * Switch the active preset. Unknown names throw; subscribers are notified so
+   * the header and footer re-render. New delegations use the new roles; already
+   * running child sessions are unaffected.
+   */
+  setActiveMode(name: string | undefined): string | undefined {
+    const canonical = name === undefined ? undefined : this.canonicalPresetName(name);
+    if (name !== undefined && canonical === undefined) {
+      throw new Error(`Unknown agents preset: ${name}.`);
+    }
+    if (canonical === this.activeModeValue) return canonical;
+    this.activeModeValue = canonical;
+    this.effectiveRoles = this.resolveRoles(canonical);
+    this.notify();
+    return canonical;
+  }
+
+  private canonicalPresetName(name: string): string | undefined {
+    return this.options.config.presets.find((preset) => preset.name.toLowerCase() === name.toLowerCase())?.name;
+  }
+
+  private resolveRoles(presetName: string | undefined): AgentRole[] {
+    return resolvePreset(this.options.config, presetName).roles;
   }
 
   subscribe(listener: () => void): () => void {
@@ -277,7 +318,7 @@ export class SubagentRuntime {
       const delegateConfig = canDelegate
         ? {
             ...this.options.config,
-            roles: this.options.config.roles.filter((role) => allowedDelegates.has(role.name.toLowerCase())),
+            roles: this.effectiveRoles.filter((role) => allowedDelegates.has(role.name.toLowerCase())),
           }
         : undefined;
       const tools = toolsForRole(resolved.role, invocation.depth, this.options.config.defaults.maxDepth);
@@ -634,7 +675,7 @@ export class SubagentRuntime {
   }
 
   private resolveRole(name: string): AgentRole {
-    const role = this.options.config.roles.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
+    const role = this.effectiveRoles.find((candidate) => candidate.name.toLowerCase() === name.toLowerCase());
     if (!role) throw new Error(`Unknown configured role: ${name}.`);
     return role;
   }

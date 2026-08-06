@@ -1,0 +1,1 @@
+Describe the attached image(s) exhaustively: transcribe all visible text verbatim, and report layout, colors, UI elements, diagrams, code, people, and anything else which might have been missed here. Include every detail you can see; do not summarize, interpret, or take action. This description is the only view another agent has of the image.

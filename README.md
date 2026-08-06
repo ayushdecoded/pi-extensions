@@ -35,17 +35,39 @@ defaults:
   maxDepth: 2
   concurrency: 10
   timeoutMinutes: 10
+  image: opencode-go/qwen3.7-plus
+  imagePrompt: agents/vision.md
+default_preset: deep
 roles:
   Atlas:
     description: Read-only explorer for codebase and web research
-    model: openai-codex/gpt-5.6-luna
-    thinking: medium
+    model: opencode-go/deepseek-v4-flash
+    thinking: high
     prompt: agents/atlas.md
     tools: [read, bash, web_search]
     delegates: []
     skills: []
     timeoutMinutes: 10
+presets:
+  light:
+    roles: [Atlas, Vigil]
+    Atlas:
+      model: opencode-go/deepseek-v4-flash
+      thinking: high
+    Vigil:
+      model: opencode-go/deepseek-v4-flash
+      thinking: max
 ```
+
+`roles` is the pool of role definitions; `presets` pick which roles are active and can override a role's `model`, `thinking`, `prompt`, `image`, or `imagePrompt` per preset. `default_preset` names the preset used when none is chosen, so everything stays in sync with the same file. Configurations without `presets` keep the classic behavior: every role is active with its own defaults.
+
+### Vision sidecar
+
+When a text-only role model reads an image file, the `read` result's image bytes are automatically replaced with a description from the configured `image` sidecar model (resolves preset → role → `defaults`; `imagePrompt` points to the instruction file, default `agents/vision.md`, falling back to the built-in prompt). The role model never sees a new tool — it calls the normal `read` — and the sidecar usage rides the tool result, so per-invocation accounting stays truthful. Models that support images get the raw image as usual and the sidecar never runs. When no sidecar is configured, image bytes are replaced with a text note instead.
+
+### Switching presets
+
+The active preset starts from `default_preset` (or the last selected one, persisted in `~/.config/pi/agents-mode.json` per config path). Use `/agent-mode` (with argument completion, or a picker when run bare) to choose a preset, or `Ctrl+Shift+S` to cycle through them. Switching takes effect immediately for new subagent calls and re-renders the header (role models + `mode:` label) and footer (`◆ mode`).
 
 Prompt paths are relative to the selected `agents.yaml`. Project configuration is rejected when Pi does not trust the project. `subagent` is not listed in `tools`; the runtime adds a filtered tool automatically when `delegates` is non-empty.
 

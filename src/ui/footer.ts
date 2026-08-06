@@ -63,7 +63,6 @@ export function createFooterController(pi: ExtensionAPI): FooterController {
             const branch = footerData.getGitBranch() ?? undefined;
             const segments = {
               branch: branchLabel(branch, theme),
-              context: contextLabel(ctx, theme),
               tokens: tokenLabel(totals.leaf, totals.cacheHit, theme),
               costs: costLabel(totals.leaf.cost, totals.tree.cost, theme),
             };
@@ -90,17 +89,19 @@ export function createFooterController(pi: ExtensionAPI): FooterController {
   };
 }
 
-function branchLabel(branch: string | undefined, theme: Theme): string {
-  return branch ? `${theme.fg("dim", "")} ${theme.fg("muted", branch)}` : "";
-}
-
-function contextLabel(ctx: ExtensionContext, theme: Theme): string {
-  const usage = ctx.getContextUsage();
+export function contextLabelFor(
+  usage: { percent: number | null; contextWindow: number } | undefined,
+  theme: Theme,
+): string {
   if (!usage) return "";
   const percent = usage.percent === null ? undefined : Math.round(usage.percent);
   const text = `${percent === undefined ? "?" : percent}%/${formatCompactNumber(usage.contextWindow)}`;
   if (percent === undefined || percent <= 65) return theme.fg("muted", text);
   return theme.fg(percent > 75 ? "error" : "warning", text);
+}
+
+function branchLabel(branch: string | undefined, theme: Theme): string {
+  return branch ? `${theme.fg("dim", "")} ${theme.fg("muted", branch)}` : "";
 }
 
 export function tokenLabel(usage: { input: number; output: number }, cacheHit: number | undefined, theme: Theme): string {
@@ -147,17 +148,17 @@ export function modelLabel(ctx: ExtensionContext, thinking: string, theme: Theme
 }
 
 function responsiveLine(
-  segments: { branch: string; context: string; tokens: string; costs: string },
+  segments: { branch: string; tokens: string; costs: string },
   right: string,
   width: number,
   theme: Theme,
 ): string {
   const separator = theme.fg("borderMuted", "  ·  ");
-  let leftParts = [segments.branch, segments.context, segments.tokens, segments.costs].filter(Boolean);
+  let leftParts = [segments.branch, segments.tokens, segments.costs].filter(Boolean);
   let left = leftParts.join(separator);
 
-  // Branch and then context are the least important pieces on narrow terminals.
-  for (const removable of [segments.branch, segments.context]) {
+  // Branch is the least important piece on narrow terminals.
+  for (const removable of [segments.branch]) {
     if (visibleWidth(left) + visibleWidth(right) + 1 <= width || !removable) break;
     leftParts = leftParts.filter((part) => part !== removable);
     left = leftParts.join(separator);

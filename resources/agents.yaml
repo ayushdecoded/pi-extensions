@@ -3,13 +3,16 @@ defaults:
   maxDepth: 2
   concurrency: 10
   timeoutMinutes: 10
+  image: opencode-go/qwen3.7-plus
+  imagePrompt: agents/vision.md
+default_preset: deep
 roles:
   Atlas:
     description: >-
       Read-only codebase and web researcher. Use for focused fact-finding; provide the question,
       relevant context, and expected evidence. Not for opinions, recommendations, plans, or implementation.
-    model: openai-codex/gpt-5.6-luna
-    thinking: medium
+    model: opencode-go/deepseek-v4-flash
+    thinking: high
     prompt: agents/atlas.md
     tools: [read, bash, web_search]
     delegates: []
@@ -28,3 +31,20 @@ roles:
     delegates: [Atlas]
     skills: []
     timeoutMinutes: 20
+presets:
+  light:
+    roles: [Atlas, Vigil]
+    Atlas:
+      model: opencode-go/deepseek-v4-flash
+      thinking: high
+    Vigil:
+      model: opencode-go/deepseek-v4-flash
+      thinking: max
+  deep:
+    roles: [Atlas, Vigil]
+    Atlas:
+      model: opencode-go/deepseek-v4-flash
+      thinking: high
+    Vigil:
+      model: openai-codex/gpt-5.6-sol
+      thinking: high

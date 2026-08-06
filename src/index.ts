@@ -8,6 +8,7 @@ import {
   packageAgentsPath,
   parseAgentsConfig,
   projectAgentsPath,
+  resolvePreset,
   validateAgentsConfig,
   validateAgentsFile,
 } from "./config/agents.ts";
@@ -19,6 +20,8 @@ import type {
   LoadAgentsConfigOptions,
   ThinkingLevel,
 } from "./config/agents.ts";
+import { createActiveModeStore, resolveActiveMode } from "./config/mode.ts";
+import { createVisionHookHandler } from "./runtime/vision-hook.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
 import { registerSaveMarkdown } from "./save-md.ts";
@@ -30,7 +33,7 @@ import { createSubagentHeadingGenerator } from "./subagent-headings.ts";
 import type { SubagentEvent } from "./runtime/types.ts";
 import { createSubagentTool } from "./tool.ts";
 import { AgentsDashboard } from "./ui/dashboard.ts";
-import { createFooterController } from "./ui/footer.ts";
+import { createFooterController, contextLabelFor } from "./ui/footer.ts";
 import { installHeader } from "./ui/header.ts";
 import { AgentsPanel } from "./ui/panel.ts";
 import { createEmojiAutocompleteProvider } from "./ui/emoji-autocomplete.ts";
@@ -52,6 +55,7 @@ export {
   packageAgentsPath,
   parseAgentsConfig,
   projectAgentsPath,
+  resolvePreset,
   validateAgentsConfig,
   validateAgentsFile,
 };
@@ -66,7 +70,9 @@ export type {
 
 export default function subagentExtension(pi: ExtensionAPI): void {
   let runtime: SubagentRuntime | undefined;
+  let currentConfig: AgentsConfig | undefined;
   let registered = false;
+  const activeModeStore = createActiveModeStore();
   const footer = createFooterController(pi);
   const codexUsage = createCodexUsageController();
   registerPackSystemPrompt(pi);
@@ -79,7 +85,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerWebSearch(pi);
   pi.registerTool(createPainterTool());
 
-  const activate = async (ctx: ExtensionContext, config: AgentsConfig): Promise<void> => {
+  // The main session's read tool also rides the vision hook: when the main model
+  // is text-only and reads an image, the sidecar description replaces the bytes.
+  pi.on("tool_result", createVisionHookHandler(() => ({
+    sidecar: currentConfig?.defaults.image,
+    promptFile: currentConfig?.defaults.imagePromptFile,
+  })));
+
+  const activate = async (ctx: ExtensionContext, config: AgentsConfig, activeMode?: string): Promise<void> => {
     const previous = runtime;
     runtime = undefined;
     await previous?.shutdown();
@@ -92,6 +105,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         rootSessionFile: ctx.sessionManager.getSessionFile(),
         cwd: ctx.cwd,
         config,
+        activeMode,
         modelRegistry: ctx.modelRegistry,
         reservedHandles: new Set(allState.agents.keys()),
         appendEvent: (event: SubagentEvent) => pi.appendEntry(SUBAGENT_ENTRY_TYPE, event),
@@ -101,9 +115,45 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     );
     runtime.reconcileInterrupted();
     const sessionRuntime = runtime;
+    installHeader(ctx, config, pi.getCommands(), sessionRuntime);
     if (ctx.mode === "tui") {
       ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => new AgentsPanel(sessionRuntime, tui, theme));
       footer.install(ctx, sessionRuntime);
+    }
+  };
+
+  /** Register or replace the subagent tool with the active preset's role set. */
+  const registerSubagentTool = (config: AgentsConfig): void => {
+    pi.registerTool(
+      createSubagentTool(config, (requests, signal, onProgress) => {
+        if (!runtime) throw new Error("Subagent runtime is not available for this session.");
+        return runtime.runRootBatch(requests, signal, onProgress);
+      }),
+    );
+  };
+
+  /** Switch the active preset, persist it, and refresh the tool schema. */
+  const switchMode = (ctx: ExtensionContext, name: string | undefined): void => {
+    const active = runtime;
+    if (!active) {
+      ctx.ui.notify("Subagent runtime is unavailable for this session.", "warning");
+      return;
+    }
+    if (active.options.config.presets.length === 0) {
+      ctx.ui.notify("No agent presets are configured in agents.yaml.", "warning");
+      return;
+    }
+    if (!name) {
+      ctx.ui.notify(`Usage: /agent-mode ${active.options.config.presets.map((preset) => preset.name).join("|")}`, "warning");
+      return;
+    }
+    try {
+      const canonical = active.setActiveMode(name);
+      activeModeStore.save(active.options.config.path, canonical);
+      ctx.ui.notify(`Agents mode: ${canonical}`, "info");
+      registerSubagentTool({ ...active.options.config, roles: [...active.activeRoles] });
+    } catch (error) {
+      ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
     }
   };
 
@@ -119,27 +169,34 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       return;
     }
 
-    installHeader(ctx, config, pi.getCommands());
+    currentConfig = config;
+    const activeMode = resolveActiveMode(config, activeModeStore.load(config.path));
+
     if (ctx.mode === "tui") {
       ctx.ui.addAutocompleteProvider(createEmojiAutocompleteProvider);
-      ctx.ui.setEditorComponent((tui, theme, keybindings) => new FullPasteEditor(tui, theme, keybindings));
+      ctx.ui.setEditorComponent(
+        (tui, theme, keybindings) =>
+          new FullPasteEditor(
+            tui,
+            theme,
+            keybindings,
+            () => runtime?.activeMode,
+            () => contextLabelFor(ctx.getContextUsage(), ctx.ui.theme),
+          ),
+      );
     }
-    await activate(ctx, config);
+    await activate(ctx, config, activeMode);
     codexUsage.start(ctx, (remaining) => footer.setCodexWeeklyRemaining(remaining));
     if (!registered) {
-      pi.registerTool(
-        createSubagentTool(config, (requests, signal, onProgress) => {
-          if (!runtime) throw new Error("Subagent runtime is not available for this session.");
-          return runtime.runRootBatch(requests, signal, onProgress);
-        }),
-      );
+      registerSubagentTool({ ...config, roles: resolvePreset(config, activeMode).roles });
       registered = true;
     }
   });
 
   pi.on("session_tree", async (_event, ctx) => {
-    const config = runtime?.options.config;
-    if (config) await activate(ctx, config);
+    const config = currentConfig;
+    const activeMode = runtime?.activeMode;
+    if (config) await activate(ctx, config, activeMode);
   });
 
   pi.registerCommand("agents", {
@@ -161,6 +218,56 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           overlayOptions: { anchor: "top-left", width: "100%", maxHeight: "100%" },
         },
       );
+    },
+  });
+
+  pi.registerCommand("agent-mode", {
+    description: "Switch the active agent preset for subagent roles",
+    getArgumentCompletions: (prefix) =>
+      (runtime?.options.config.presets ?? [])
+        .filter((preset) => preset.name.toLowerCase().startsWith(prefix.toLowerCase()))
+        .map((preset) => ({
+          value: preset.name,
+          label: preset.name,
+          description: `Roles: ${preset.roleNames.join(", ")}`,
+        })),
+    handler: async (args, ctx) => {
+      const active = runtime;
+      if (!active) {
+        ctx.ui.notify("Subagent runtime is unavailable for this session.", "warning");
+        return;
+      }
+      const presets = active.options.config.presets;
+      if (presets.length === 0) {
+        ctx.ui.notify("No agent presets are configured in agents.yaml.", "warning");
+        return;
+      }
+      let name = args.trim();
+      if (!name && ctx.hasUI) {
+        const selected = await ctx.ui.select("Agent preset", presets.map((preset) => preset.name));
+        if (!selected) return;
+        name = selected;
+      }
+      switchMode(ctx, name);
+    },
+  });
+
+  pi.registerShortcut("ctrl+shift+s", {
+    description: "Cycle agent preset",
+    handler: (ctx) => {
+      const active = runtime;
+      if (!active) {
+        ctx.ui.notify("Subagent runtime is unavailable for this session.", "warning");
+        return;
+      }
+      const presets = active.options.config.presets;
+      if (presets.length === 0) {
+        ctx.ui.notify("No agent presets are configured in agents.yaml.", "warning");
+        return;
+      }
+      const current = active.activeMode;
+      const index = current ? presets.findIndex((preset) => preset.name.toLowerCase() === current.toLowerCase()) : -1;
+      switchMode(ctx, presets[(index + 1) % presets.length]!.name);
     },
   });
 

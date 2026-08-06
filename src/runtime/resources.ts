@@ -6,6 +6,7 @@ import {
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentRole } from "../config/agents.ts";
+import { createVisionHookExtension } from "./vision-hook.ts";
 
 export async function createRoleResourceLoader(cwd: string, role: AgentRole): Promise<{
   loader: ResourceLoader;
@@ -23,6 +24,7 @@ export async function createRoleResourceLoader(cwd: string, role: AgentRole): Pr
     noExtensions: true,
     noPromptTemplates: true,
     noThemes: true,
+    extensionFactories: [createVisionHookExtension(() => ({ sidecar: role.image, promptFile: role.imagePromptFile }))],
     skillsOverride: (base) => ({
       skills: base.skills.filter((skill) => allowedSkills.has(skill.name)),
       diagnostics: base.diagnostics,

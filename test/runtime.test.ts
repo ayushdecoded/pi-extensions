@@ -4,7 +4,12 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { CapacityScheduler } from "../src/runtime/scheduler.ts";
 import { advanceStateRevision, applyEvent, emptyRuntimeState, usageDelta } from "../src/runtime/state.ts";
 import { ZERO_USAGE, type InvocationRecord } from "../src/runtime/types.ts";
-import { SubagentRuntime, toolsForRole, usageWithPendingAssistant } from "../src/runtime/runtime.ts";
+import type { AgentsConfig } from "../src/config/agents.ts";
+import {
+  SubagentRuntime,
+  toolsForRole,
+  usageWithPendingAssistant,
+} from "../src/runtime/runtime.ts";
 import { costColor, invocationDuration, renderPanel } from "../src/ui/panel.ts";
 import { projectBatches } from "../src/ui/projection.ts";
 import { roleColor, stripLeadingRoleNames } from "../src/ui/roles.ts";
@@ -41,6 +46,60 @@ test("runtime injects the subagent tool only for delegating roles below max dept
   assert.deepEqual(toolsForRole({ tools: ["read"], delegates: [] }, 1, 2), ["read"]);
   assert.deepEqual(toolsForRole({ tools: ["read", "write"], delegates: ["Atlas"] }, 1, 2), ["read", "write", "subagent"]);
   assert.deepEqual(toolsForRole({ tools: ["read", "write"], delegates: ["Atlas"] }, 2, 2), ["read", "write"]);
+});
+
+test("switching the active preset re-resolves roles and notifies subscribers", () => {
+  const config = {
+    path: "/tmp/agents.yaml",
+    version: 1,
+    defaults: { maxDepth: 2, concurrency: 10, timeoutMinutes: 10 },
+    defaultPreset: "deep",
+    roles: [{
+      name: "Atlas",
+      description: "Read-only explorer",
+      model: "openai-codex/gpt-5.6-luna",
+      thinking: "medium",
+      promptPath: "agents/atlas.md",
+      promptFile: "/tmp/atlas.md",
+      tools: ["read", "bash"],
+      delegates: [],
+      timeoutMinutes: 10,
+    }],
+    presets: [
+      { name: "deep", roleNames: ["Atlas"], overrides: new Map() },
+      {
+        name: "light",
+        roleNames: ["Atlas"],
+        overrides: new Map([["Atlas", { model: "opencode-go/deepseek-v4-flash", thinking: "high" }]]),
+      },
+    ],
+  } as unknown as AgentsConfig;
+  const runtime = new SubagentRuntime({
+    rootSessionId: "mode-root",
+    cwd: "/tmp",
+    config,
+    modelRegistry: {} as any,
+    appendEvent: () => {},
+  });
+  let updates = 0;
+  runtime.subscribe(() => { updates += 1; });
+  const resolveRole = (SubagentRuntime.prototype as any).resolveRole.bind(runtime);
+
+  assert.equal(runtime.activeMode, "deep");
+  assert.equal(resolveRole("Atlas").model, "openai-codex/gpt-5.6-luna");
+
+  assert.equal(runtime.setActiveMode("LIGHT"), "light");
+  assert.equal(runtime.activeMode, "light");
+  assert.equal(resolveRole("Atlas").model, "opencode-go/deepseek-v4-flash");
+  assert.equal(resolveRole("Atlas").thinking, "high");
+  assert.deepEqual(runtime.activeRoles.map((role) => role.name), ["Atlas"]);
+  assert.equal(updates, 1);
+
+  // Switching to the already-active mode is a no-op.
+  runtime.setActiveMode("light");
+  assert.equal(updates, 1);
+
+  assert.throws(() => runtime.setActiveMode("missing"), /Unknown agents preset: missing\./);
 });
 
 test("configured timeouts are defaults rather than maximum limits", () => {
@@ -299,9 +358,7 @@ test("live usage includes the assistant message not yet present in session stats
   assert.deepEqual(usageWithPendingAssistant(persisted, message), {
     input: 14, output: 7, cacheRead: 9, cacheWrite: 8, total: 38, cost: 0.30000000000000004,
   });
-});
-
-test("panel rows show tree metrics without leaking tasks", () => {
+});test("panel rows show tree metrics without leaking tasks", () => {
   const state = emptyRuntimeState();
   applyEvent(state, { type: "batch.started", batch: { id: "batch", createdAt: 1 } });
   for (const item of [
@@ -434,6 +491,7 @@ function validationRuntime(events: unknown[]): SubagentRuntime {
         delegates: [],
         timeoutMinutes: 10,
       }],
+      presets: [],
     },
     modelRegistry: {} as any,
     appendEvent: (event) => events.push(event),

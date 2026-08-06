@@ -30,6 +30,7 @@ const config: AgentsConfig = {
       delegates: [],
     },
   ],
+  presets: [],
 };
 
 test("tool schema derives role names and descriptions without exposing runtime depth", () => {
@@ -39,7 +40,7 @@ test("tool schema derives role names and descriptions without exposing runtime d
   assert.match(schema, /Focused exploration/);
   assert.match(schema, /Builder/);
   assert.match(schema, /Minutes; omit for default, -1 for no timeout/);
-  assert.doesNotMatch(`${tool.description}\n${schema}`, /maxDepth|remaining depth|depth available|smaller positive|maximum timeout/i);
+  assert.doesNotMatch(`${tool.description}\n${schema}`, /maxDepth|remaining depth|depth available|smaller positive|maximum timeout|images/i);
 });
 
 test("tool card shows each role and full prompt once without duplicate result metadata", () => {

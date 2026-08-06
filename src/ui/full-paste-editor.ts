@@ -1,21 +1,64 @@
 import { CustomEditor, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
-import type { EditorTheme, TUI } from "@earendil-works/pi-tui";
+import { visibleWidth, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
 import { getEmojiInlineReplacement } from "./emoji-autocomplete.ts";
 
 const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 
 /**
+ * Render the composer's top border: left `──── ◆ mode ◇ ──`, right context
+ * usage, dashes filling the middle. Context is dropped first when narrow.
+ */
+export function composerBorder(
+  width: number,
+  mode: string | undefined,
+  context: string,
+  borderColor: (text: string) => string,
+): string {
+  const dash = borderColor("─");
+  const plainLeft = mode === undefined ? "" : `──── ◆ ${mode} ◇ `;
+  const left = borderColor(plainLeft);
+  const leftWidth = visibleWidth(left);
+  const contextWidth = visibleWidth(context);
+  if (leftWidth >= width) return borderColor(plainLeft.slice(0, width));
+  if (context && leftWidth + contextWidth + 2 > width) return `${left}${dash.repeat(width - leftWidth)}`;
+  if (!left && context && contextWidth + 1 >= width) return dash.repeat(width);
+  const fill = Math.max(0, width - leftWidth - contextWidth - (context ? 1 : 0));
+  return `${left}${dash.repeat(fill)}${context ? ` ${context}` : ""}`;
+}
+
+/**
  * The stock editor stores large bracketed pastes behind an atomic marker.
  * Keep the terminal's paste framing, but insert the payload as ordinary text
- * so it remains directly editable.
+ * so it remains directly editable. Also renders the active agent preset as a
+ * title on the composer's top border.
  */
 export class FullPasteEditor extends CustomEditor {
   private fullPasteBuffer = "";
   private fullPasteActive = false;
+  private readonly getMode: (() => string | undefined) | undefined;
+  private readonly getContext: (() => string) | undefined;
 
-  constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) {
+  constructor(
+    tui: TUI,
+    theme: EditorTheme,
+    keybindings: KeybindingsManager,
+    getMode?: () => string | undefined,
+    getContext?: () => string,
+  ) {
     super(tui, theme, keybindings);
+    this.getMode = getMode;
+    this.getContext = getContext;
+  }
+
+  override render(width: number): string[] {
+    const lines = super.render(width);
+    if (lines.length === 0 || lines[0] === undefined) return lines;
+    const mode = this.getMode?.();
+    const context = this.getContext?.() ?? "";
+    if (!mode && !context) return lines;
+    lines[0] = composerBorder(width, mode, context, this.borderColor);
+    return lines;
   }
 
   override handleInput(data: string): void {

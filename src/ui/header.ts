@@ -11,6 +11,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentsConfig } from "../config/agents.ts";
+import { resolvePreset } from "../config/agents.ts";
 import { roleRgb, roleText } from "./roles.ts";
 
 const RESET = "\x1b[0m";
@@ -57,6 +58,8 @@ export type HeaderInfo = {
   themes?: string[];
   configFile: string;
   contextFiles: string[];
+  /** Active agent preset, shown next to the role list. */
+  mode?: string;
 };
 
 type DisplaySection = {
@@ -65,18 +68,16 @@ type DisplaySection = {
   meta?: string;
 };
 
-export function installHeader(ctx: ExtensionContext, config: AgentsConfig, commands: readonly { name: string; source: string; sourceInfo: { source: string } }[]): void {
+export function installHeader(
+  ctx: ExtensionContext,
+  config: AgentsConfig,
+  commands: readonly { name: string; source: string; sourceInfo: { source: string } }[],
+  runtime: { activeMode: string | undefined; subscribe(listener: () => void): () => void },
+): void {
   if (ctx.mode !== "tui") return;
   const title = formatDirectory(ctx.cwd);
-  const info: HeaderInfo = {
+  const base: Omit<HeaderInfo, "agents" | "mode"> = {
     version: piVersion(),
-    agents: [...config.roles]
-      .sort((left, right) => roleOrder(left.name) - roleOrder(right.name))
-      .map((role) => ({
-        name: role.name,
-        model: role.model.split("/").at(-1) ?? role.model,
-        thinking: role.thinking,
-      })),
     concurrency: config.defaults.concurrency,
     // Pi has already resolved skills from every supported source before session_start.
     // Read its effective prompt rather than duplicating its discovery rules here.
@@ -89,15 +90,34 @@ export function installHeader(ctx: ExtensionContext, config: AgentsConfig, comma
   };
 
   ctx.ui.setHeader((tui, theme) => {
+    const stop = runtime.subscribe(() => tui.requestRender(true));
     queueMicrotask(() => tui.requestRender(true));
     return {
       invalidate() {},
+      dispose() {
+        stop();
+      },
       render(width: number): string[] {
+        const info: HeaderInfo = {
+          ...base,
+          ...(runtime.activeMode === undefined ? {} : { mode: runtime.activeMode }),
+          agents: agentsForMode(config, runtime.activeMode),
+        };
         return renderHeader(title, width, info, theme);
       },
     };
   });
   ctx.ui.setTitle(`pi — ${title}`);
+}
+
+function agentsForMode(config: AgentsConfig, mode: string | undefined): HeaderInfo["agents"] {
+  return resolvePreset(config, mode).roles
+    .sort((left, right) => roleOrder(left.name) - roleOrder(right.name))
+    .map((role) => ({
+      name: role.name,
+      model: role.model.split("/").at(-1) ?? role.model,
+      thinking: role.thinking,
+    }));
 }
 
 export function renderHeader(title: string, width: number, info?: HeaderInfo, theme?: Theme): string[] {
@@ -134,7 +154,7 @@ export function renderHeader(title: string, width: number, info?: HeaderInfo, th
   const agents: DisplaySection = {
     name: "AGENTS",
     rows: agentRows,
-    meta: `${info.configFile}  │  ${info.concurrency} concurrent`,
+    meta: [info.mode && `mode:${info.mode}`, info.configFile, `${info.concurrency} concurrent`].filter(Boolean).join("  │  "),
   };
   const context: DisplaySection = { name: "CONTEXT", rows: contextRows };
   const commands: DisplaySection = { name: "COMMANDS", rows: commandRows };

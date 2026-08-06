@@ -127,6 +127,8 @@ export type RuntimeOptions = {
   reservedHandles?: Set<string>;
   appendEvent: (event: SubagentEvent) => void;
   generateHeadings?: SubagentHeadingGenerator;
+  /** Name of the active preset; roles resolve through it. Defaults to default_preset. */
+  activeMode?: string;
 };
 
 export type SubagentEvent =
