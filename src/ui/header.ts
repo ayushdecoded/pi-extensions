@@ -139,7 +139,7 @@ export function renderHeader(title: string, width: number, info?: HeaderInfo, th
   const contextRows = info.contextFiles.length
     ? info.contextFiles.map((file, index) => `${foreground([221, 176, 91], String(index + 1).padStart(2, "0"))}  ${foreground([151, 174, 204], file)}`)
     : [foreground([116, 139, 171], "No context files")];
-  const commandRows = ["/agents", "/handoff", "/create-skill", "/save-md", "/name", "/ass"].map(
+  const commandRows = ["/agents", "/handoff", "/create-skill", "/save-md", "/name"].map(
     (command) => `${foreground([71, 151, 251], "›")}  ${foreground([151, 174, 204], command)}`,
   );
   const skillRows = info.skills.length

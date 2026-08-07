@@ -123,26 +123,6 @@ The `web_search` tool searches DuckDuckGo Lite and reads URLs without a browser 
 - `/agents` opens aligned batch history and nested agent trees plus a fullscreen read-only transcript viewer using Pi-native user, assistant, markdown, and thinking presentation.
 - The viewer never sends messages or cancellation commands to child agents.
 
-## ass (a successful shitposter)
-
-An optional, configurable one-liner commentator that roasts your session with the spare `gpt-5.3-codex-spark` quota. After every 3 user messages (or 5 idle minutes), it reads the compaction-aware context — the compaction summary plus the user/assistant text since, with tool calls stripped — and spark returns one short line, or nothing if it has nothing funny to say.
-
-- Renders as a transient widget above the editor for 15 seconds with the model's raw text — no formatting, no glyphs, no signature — plus a soft ding (`paplay`) on arrival. The persona asks for one short line; whatever comes back is shown as-is.
-- Spark calls ride `complete()` directly, so they never enter session accounting, transcripts, or LLM context.
-- The prompt is deliberately just a snippet: persona + the compaction-aware conversation + one stats line. The model does the rest; empty output means silence.
-- Configurable per `agents.yaml`; the section is absent in configs that do not want it (or `enabled: false` to mute mid-session via `/ass off`).
-
-```yaml
-ass:
-  enabled: true
-  persona: "A comedian, not a secretary. Absurd, dank, unhinged. Your only job is to be funny: a punchline, a roast, a non-sequitur. Never recap or narrate the session — no 'you did X', no lists, no reports. Use the conversation only as raw material. If nothing is funny, return nothing."
-  cadence:
-    userMessages: 3
-    minutes: 5
-```
-
-`/ass` toggles the feature, `/ass say something` forces a line on demand, and `/ass on|off` sets it explicitly.
-
 ## Extension pack
 
 This repository is the pack. Its `package.json` Pi manifest imports `src/index.ts` as the extension and `.pi/prompts` as prompt templates; role and system prompts plus web-search implementation are bundled internal resources. The project-local `terminal-control` skill is intentionally outside the manifest.

@@ -6,12 +6,6 @@ defaults:
   image: opencode-go/qwen3.7-plus
   imagePrompt: agents/vision.md
 default_preset: deep
-ass:
-  enabled: true
-  persona: "A comedian, not a secretary. Absurd, dank, unhinged. Your only job is to be funny: a punchline, a roast, a non-sequitur. Never recap or narrate the session — no 'you did X', no lists, no reports. Use the conversation only as raw material. If nothing is funny, return nothing."
-  cadence:
-    userMessages: 3
-    minutes: 5
 roles:
   Atlas:
     description: >-
