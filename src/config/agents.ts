@@ -61,6 +61,27 @@ export type AgentPreset = {
   overrides: Map<string, AgentPresetOverride>;
 };
 
+export type AssCadence = {
+  /** Fire when this many new user messages have settled since the last attempt. */
+  userMessages: number;
+  /** Fire when this many minutes pass since the last attempt, even while idle. */
+  minutes: number;
+};
+
+/** ass (a successful shitposter): one-line session commentary driven by spark. */
+export type AssConfig = {
+  enabled: boolean;
+  persona: string;
+  cadence: AssCadence;
+};
+
+export const DEFAULT_ASS_CONFIG: AssConfig = {
+  enabled: true,
+  persona:
+    "A comedian, not a secretary. Absurd, dank, unhinged. Your only job is to be funny: a punchline, a roast, a non-sequitur. Never recap or narrate the session — no 'you did X', no lists, no reports. Use the conversation only as raw material. If nothing is funny, return nothing.",
+  cadence: { userMessages: 3, minutes: 5 },
+};
+
 export type AgentsConfig = {
   path: string;
   version: 1;
@@ -69,7 +90,14 @@ export type AgentsConfig = {
   defaultPreset?: string;
   roles: AgentRole[];
   presets: AgentPreset[];
+  /** ass (a successful shitposter); disabled when the section is absent. */
+  ass?: AssConfig;
 };
+
+/** Resolve the effective ass config; absent sections are disabled. */
+export function resolveAssConfig(config: AgentsConfig): AssConfig {
+  return config.ass ?? { ...DEFAULT_ASS_CONFIG, enabled: false };
+}
 
 export type AgentsConfigValidation = {
   ok: boolean;
@@ -83,7 +111,9 @@ export type LoadAgentsConfigOptions = {
   packagePath?: string;
 };
 
-const ROOT_KEYS = ["version", "defaults", "roles", "presets", "default_preset"];
+const ROOT_KEYS = ["version", "defaults", "roles", "presets", "default_preset", "ass"];
+const ASS_KEYS = ["enabled", "persona", "cadence"];
+const CADENCE_KEYS = ["userMessages", "minutes"];
 const DEFAULT_KEYS = ["maxDepth", "concurrency", "timeoutMinutes", "image", "imagePrompt"];
 const ROLE_KEYS = [
   "description",
@@ -156,7 +186,8 @@ export function parseAgentsConfig(value: unknown, sourcePath: string): AgentsCon
   const roles = parseRoles(value.roles, sourcePath);
   const presets = parsePresets(value.presets, roles, sourcePath);
   const defaultPreset = parseDefaultPreset(value.default_preset, presets);
-  return { path: sourcePath, version: 1, defaults, roles, presets, ...(defaultPreset === undefined ? {} : { defaultPreset }) };
+  const ass = parseAssConfig(value.ass, sourcePath);
+  return { path: sourcePath, version: 1, defaults, roles, presets, ass, ...(defaultPreset === undefined ? {} : { defaultPreset }) };
 }
 
 /** Return diagnostics without throwing, useful for a config-check command or tests. */
@@ -183,6 +214,35 @@ export function validateAgentsFile(options: LoadAgentsConfigOptions = {}): {
   } catch (error) {
     return { exists: true, path: file, ok: false, errors: [errorMessage(error)] };
   }
+}
+
+function parseAssConfig(value: unknown, sourcePath: string): AssConfig {
+  if (value === undefined) return { ...DEFAULT_ASS_CONFIG, enabled: false };
+  if (!isRecord(value)) throw new Error("ass must be an object.");
+  assertOnlyKeys(value, ASS_KEYS, "ass");
+  const enabled = value.enabled === undefined ? true : booleanValue(value.enabled, "ass.enabled");
+  const persona =
+    value.persona === undefined ? DEFAULT_ASS_CONFIG.persona : nonEmptyString(value.persona, "ass.persona");
+  return { enabled, persona, cadence: parseAssCadence(value.cadence) };
+}
+
+function parseAssCadence(value: unknown): AssCadence {
+  if (value === undefined) return { ...DEFAULT_ASS_CONFIG.cadence };
+  if (!isRecord(value)) throw new Error("ass.cadence must be an object.");
+  assertOnlyKeys(value, CADENCE_KEYS, "ass.cadence");
+  return {
+    userMessages:
+      value.userMessages === undefined
+        ? DEFAULT_ASS_CONFIG.cadence.userMessages
+        : positiveInteger(value.userMessages, "ass.cadence.userMessages"),
+    minutes:
+      value.minutes === undefined ? DEFAULT_ASS_CONFIG.cadence.minutes : positiveInteger(value.minutes, "ass.cadence.minutes"),
+  };
+}
+
+function booleanValue(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") throw new Error(`${label} must be a boolean.`);
+  return value;
 }
 
 function parseDefaults(value: unknown, sourcePath: string): AgentsDefaults {

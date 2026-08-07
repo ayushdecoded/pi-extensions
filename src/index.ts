@@ -8,6 +8,7 @@ import {
   packageAgentsPath,
   parseAgentsConfig,
   projectAgentsPath,
+  resolveAssConfig,
   resolvePreset,
   validateAgentsConfig,
   validateAgentsFile,
@@ -17,9 +18,12 @@ import type {
   AgentsConfig,
   AgentsConfigValidation,
   AgentsDefaults,
+  AssCadence,
+  AssConfig,
   LoadAgentsConfigOptions,
   ThinkingLevel,
 } from "./config/agents.ts";
+import { DEFAULT_ASS_CONFIG } from "./config/agents.ts";
 import { createActiveModeStore, resolveActiveMode } from "./config/mode.ts";
 import { createVisionHookHandler } from "./runtime/vision-hook.ts";
 import { registerHandoffCommand } from "./handoff.ts";
@@ -44,6 +48,7 @@ import { createCodexUsageController } from "./ui/codex-usage.ts";
 import { createPainterTool } from "./painter.ts";
 import { registerVoiceInput } from "./voice-input.ts";
 import registerWebSearch from "./web-search/index.ts";
+import { registerAss, type AssController } from "./ass.ts";
 
 const WIDGET_KEY = "pi-subagents";
 
@@ -56,15 +61,19 @@ export {
   packageAgentsPath,
   parseAgentsConfig,
   projectAgentsPath,
+  resolveAssConfig,
   resolvePreset,
   validateAgentsConfig,
   validateAgentsFile,
+  DEFAULT_ASS_CONFIG,
 };
 export type {
   AgentRole,
   AgentsConfig,
   AgentsConfigValidation,
   AgentsDefaults,
+  AssCadence,
+  AssConfig,
   LoadAgentsConfigOptions,
   ThinkingLevel,
 };
@@ -76,6 +85,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   const activeModeStore = createActiveModeStore();
   const footer = createFooterController(pi);
   const codexUsage = createCodexUsageController();
+  const ass = registerAss(pi);
   registerPackSystemPrompt(pi);
   registerThinkingShortcuts(pi);
   registerVoiceInput(pi);
@@ -189,6 +199,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     }
     await activate(ctx, config, activeMode);
     codexUsage.start(ctx, (remaining) => footer.setCodexWeeklyRemaining(remaining));
+    ass.start(ctx, resolveAssConfig(config));
     if (!registered) {
       registerSubagentTool({ ...config, roles: resolvePreset(config, activeMode).roles });
       registered = true;
@@ -198,7 +209,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   pi.on("session_tree", async (_event, ctx) => {
     const config = currentConfig;
     const activeMode = runtime?.activeMode;
-    if (config) await activate(ctx, config, activeMode);
+    if (config) {
+      await activate(ctx, config, activeMode);
+      ass.start(ctx, resolveAssConfig(config));
+    }
   });
 
   pi.registerCommand("agents", {
@@ -289,6 +303,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     ctx.ui.setFooter(undefined);
     ctx.ui.setHeader(undefined);
     codexUsage.stop();
+    ass.stop(ctx);
     footer.dispose();
     const active = runtime;
     runtime = undefined;
