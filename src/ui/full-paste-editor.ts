@@ -6,8 +6,8 @@ const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 
 /**
- * Render the composer's top border: left `──── ◆ mode ◇ ──`, right context
- * usage, dashes filling the middle. Context is dropped first when narrow.
+ * Render the composer's top border: left `45%/200k ──`, right `◆ mode ◇`,
+ * dashes filling the middle. Context is dropped first when narrow.
  */
 export function composerBorder(
   width: number,
@@ -16,15 +16,16 @@ export function composerBorder(
   borderColor: (text: string) => string,
 ): string {
   const dash = borderColor("─");
-  const plainLeft = mode === undefined ? "" : `──── ◆ ${mode} ◇ `;
-  const left = borderColor(plainLeft);
+  const left = context;
+  const right = mode ? borderColor(` ◆ ${mode} ◇`) : "";
   const leftWidth = visibleWidth(left);
-  const contextWidth = visibleWidth(context);
-  if (leftWidth >= width) return borderColor(plainLeft.slice(0, width));
-  if (context && leftWidth + contextWidth + 2 > width) return `${left}${dash.repeat(width - leftWidth)}`;
-  if (!left && context && contextWidth + 1 >= width) return dash.repeat(width);
-  const fill = Math.max(0, width - leftWidth - contextWidth - (context ? 1 : 0));
-  return `${left}${dash.repeat(fill)}${context ? ` ${context}` : ""}`;
+  const rightWidth = visibleWidth(right);
+  if (left && right && leftWidth + rightWidth + 2 > width) {
+    return composerBorder(width, mode, "", borderColor);
+  }
+  if (!left && rightWidth >= width) return borderColor(`◆ ${mode} ◇`.slice(0, width));
+  const fill = Math.max(0, width - leftWidth - rightWidth);
+  return `${left}${dash.repeat(fill)}${right}`;
 }
 
 /**
