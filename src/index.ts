@@ -88,7 +88,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   pi.registerTool(createPainterTool());
 
   // The main session's read tool also rides the vision hook: when the main model
-  // is text-only and reads an image, the sidecar description replaces the bytes.
+  // is text-only and reads an image, the sidecar description is appended to the
+  // read result so the transcript keeps the image while the model still gets a
+  // description of it.
   pi.on("tool_result", createVisionHookHandler(() => ({
     sidecar: currentConfig?.defaults.image,
     promptFile: currentConfig?.defaults.imagePromptFile,

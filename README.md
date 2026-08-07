@@ -63,7 +63,7 @@ presets:
 
 ### Vision sidecar
 
-When a text-only role model reads an image file, the `read` result's image bytes are automatically replaced with a description from the configured `image` sidecar model (resolves preset → role → `defaults`; `imagePrompt` points to the instruction file, default `agents/vision.md`, falling back to the built-in prompt). The role model never sees a new tool — it calls the normal `read` — and the sidecar usage rides the tool result, so per-invocation accounting stays truthful. Models that support images get the raw image as usual and the sidecar never runs. When no sidecar is configured, image bytes are replaced with a text note instead.
+When a text-only role model reads an image file, the `read` result keeps the image bytes (so the transcript still shows the image) and appends a description from the configured `image` sidecar model (resolves preset → role → `defaults`; `imagePrompt` points to the instruction file, default `agents/vision.md`, falling back to the built-in prompt). The role model never sees a new tool — it calls the normal `read` — and the sidecar usage rides the tool result, so per-invocation accounting stays truthful. Models that support images get the raw image as usual and the sidecar never runs. When no sidecar is configured, a text note is appended instead.
 
 ### Switching presets
 

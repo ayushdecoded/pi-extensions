@@ -41,9 +41,10 @@ type NativeUsage = {
 
 /**
  * The one image-viewing mechanism: when a text-only model's `read` returns
- * image bytes, swap them for a description from the configured vision sidecar.
- * The model never sees a new tool — it just called read. Image-capable models
- * are untouched, and no-sidecar sessions get a plain text note.
+ * image bytes, keep them (so the transcript still shows the image) and append
+ * a description from the configured vision sidecar. The model never sees a new
+ * tool — it just called read. Image-capable models are untouched, and
+ * no-sidecar sessions get a plain text note.
  *
  * The vision config comes from agents.yaml via the getter: subagents use the
  * resolved role preset (`image`/`imagePrompt`), the main session uses the
@@ -52,7 +53,7 @@ type NativeUsage = {
 export function createVisionHookHandler(
   getVision: () => VisionConfig,
   describe: DescribeImages = describeImages,
-): (event: ToolResultEvent, ctx: ExtensionContext) => Promise<{ content: TextContent[]; usage?: NativeUsage } | void> {
+): (event: ToolResultEvent, ctx: ExtensionContext) => Promise<{ content: (TextContent | ImageContent)[]; usage?: NativeUsage } | void> {
   return async (event, ctx) => {
     if (event.toolName !== "read") return;
     const model = ctx.model;
@@ -63,25 +64,25 @@ export function createVisionHookHandler(
 
     const { sidecar: sidecarId, promptFile } = getVision();
     if (!sidecarId) {
-      return { content: replaceImages(event.content, IMAGES_DISABLED_NOTE) };
+      return { content: appendNote(event.content, IMAGES_DISABLED_NOTE) };
     }
 
     const slash = sidecarId.indexOf("/");
     const sidecar = ctx.modelRegistry.find(sidecarId.slice(0, slash), sidecarId.slice(slash + 1));
     if (!sidecar) {
-      return { content: replaceImages(event.content, `Image analysis unavailable: ${sidecarId} is not in the model catalog.`) };
+      return { content: appendNote(event.content, `Image analysis unavailable: ${sidecarId} is not in the model catalog.`) };
     }
 
     const prompt = promptFile ? readFileSync(promptFile, "utf8").trim() : VISION_PROMPT;
     try {
       const { text, usage } = await describe(ctx.cwd, sidecar, images, prompt, ctx.signal ?? undefined);
       return {
-        content: replaceImages(event.content, `<image analysis>\n${text}\n</image analysis>`),
+        content: appendNote(event.content, `<image analysis>\n${text}\n</image analysis>`),
         usage: addNativeUsage(event.usage, toNativeUsage(usage)),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { content: replaceImages(event.content, `Image analysis failed: ${message}`) };
+      return { content: appendNote(event.content, `Image analysis failed: ${message}`) };
     }
   };
 }
@@ -152,15 +153,9 @@ async function createSidecarResourceLoader(cwd: string, settings: SettingsManage
   return loader;
 }
 
-/** Keep the read result's text notes and swap every image part for the given text. */
-export function replaceImages(content: Array<{ type: string; text?: string }> | undefined, replacement: string): TextContent[] {
-  const text = (content ?? [])
-    .filter((part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string")
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-  const body = text ? `${text}\n\n${replacement}` : replacement;
-  return [{ type: "text", text: body }];
+/** Keep the read result's text notes and images, appending the given note as a final text block. */
+export function appendNote<T extends { type: string }>(content: T[] | undefined, note: string): (T | TextContent)[] {
+  return [...(content ?? []), { type: "text", text: note }];
 }
 
 function statsUsage(stats: {

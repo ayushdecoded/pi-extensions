@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  appendNote,
   createVisionHookExtension,
-  replaceImages,
   type VisionConfig,
 } from "../src/runtime/vision-hook.ts";
 
@@ -59,14 +59,16 @@ test("vision hook passes images through when the model can see them", async () =
   assert.equal(ran, false);
 });
 
-test("vision hook replaces images with a note when no sidecar is configured", async () => {
+test("vision hook keeps the image and appends a note when no sidecar is configured", async () => {
   const handler = captureHandler({});
   const result = await handler(READ_IMAGE, hookContext());
   assert.deepEqual(result, {
     content: [
+      { type: "text", text: "Read image file [png]\n/tmp/shot.png" },
+      { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
       {
         type: "text",
-        text: "Read image file [png]\n/tmp/shot.png\n\nImage reading is disabled: this model cannot see images and no image model is configured.",
+        text: "Image reading is disabled: this model cannot see images and no image model is configured.",
       },
     ],
   });
@@ -90,10 +92,9 @@ test("vision hook runs the sidecar and folds its usage into the read result", as
 
   assert.deepEqual(result, {
     content: [
-      {
-        type: "text",
-        text: "Read image file [png]\n/tmp/shot.png\n\n<image analysis>\nA red block on white.\n</image analysis>",
-      },
+      { type: "text", text: "Read image file [png]\n/tmp/shot.png" },
+      { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+      { type: "text", text: "<image analysis>\nA red block on white.\n</image analysis>" },
     ],
     usage: {
       input: 51,
@@ -116,13 +117,20 @@ test("vision hook reports sidecar failures as a text note", async () => {
   });
   const result = await handler(READ_IMAGE, hookContext());
   assert.deepEqual(result, {
-    content: [{ type: "text", text: "Read image file [png]\n/tmp/shot.png\n\nImage analysis failed: provider down" }],
+    content: [
+      { type: "text", text: "Read image file [png]\n/tmp/shot.png" },
+      { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+      { type: "text", text: "Image analysis failed: provider down" },
+    ],
   });
 });
 
-test("replaceImages keeps text notes and swaps every image part", () => {
-  assert.deepEqual(replaceImages([{ type: "text", text: "a" }, { type: "image" }, { type: "text", text: "b" }], "X"), [
-    { type: "text", text: "a\nb\n\nX" },
+test("appendNote keeps text and image parts and appends the note", () => {
+  assert.deepEqual(appendNote([{ type: "text", text: "a" }, { type: "image" }, { type: "text", text: "b" }], "X"), [
+    { type: "text", text: "a" },
+    { type: "image" },
+    { type: "text", text: "b" },
+    { type: "text", text: "X" },
   ]);
-  assert.deepEqual(replaceImages(undefined, "X"), [{ type: "text", text: "X" }]);
+  assert.deepEqual(appendNote(undefined, "X"), [{ type: "text", text: "X" }]);
 });
