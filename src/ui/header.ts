@@ -149,6 +149,7 @@ export function renderHeader(title: string, width: number, info?: HeaderInfo, th
     `${foreground([93, 171, 255], "↑")}  Alt+.  ${foreground([116, 139, 171], "Deeper thinking")}`,
     `${foreground([93, 171, 255], "↓")}  Alt+,  ${foreground([116, 139, 171], "Lighter thinking")}`,
     `${foreground([93, 171, 255], "↻")}  Alt+M  ${foreground([116, 139, 171], "Next model")}`,
+    `${foreground([93, 171, 255], "🎙")}  Ctrl+Shift+R  ${foreground([116, 139, 171], "Voice input")}`,
   ];
 
   const agents: DisplaySection = {

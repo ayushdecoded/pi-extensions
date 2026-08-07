@@ -6,6 +6,7 @@ import { defineTool, type ExtensionContext } from "@earendil-works/pi-coding-age
 import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { codexAuth as resolveCodexAuth, codexAuthHeaders } from "./codex-auth.ts";
 
 const CODEX_IMAGES_URL = "https://chatgpt.com/backend-api/codex/images";
 const MAX_REFERENCES = 5;
@@ -88,7 +89,7 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
       const mode = params.mode ?? "ui";
       const references = await loadReferences(params.reference_images ?? [], ctx.cwd);
       const operation = references.length ? "edit" : "generate";
-      const auth = await codexAuth(ctx);
+      const auth = await resolveCodexAuth(ctx, "Painter");
       const requestSignal = timeoutSignal(signal, REQUEST_TIMEOUT_MS);
       try {
         const response = await fetchImpl(`${CODEX_IMAGES_URL}/${operation === "edit" ? "edits" : "generations"}`, {
@@ -124,35 +125,14 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
   });
 }
 
-async function codexAuth(ctx: ExtensionContext): Promise<{ apiKey: string; headers?: ProviderHeaders }> {
-  const model = ctx.model?.provider === "openai-codex"
-    ? ctx.model
-    : ctx.modelRegistry.getAll().find((candidate) => candidate.provider === "openai-codex");
-  if (!model) throw new Error("Painter requires an OpenAI Codex login. Select an openai-codex model and sign in first.");
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok || !auth.apiKey) throw new Error(`Painter could not access Codex OAuth credentials${auth.ok ? "." : `: ${auth.error}`}`);
-  return { apiKey: auth.apiKey, headers: auth.headers };
-}
-
 function codexHeaders(apiKey: string, authHeaders: ProviderHeaders | undefined, toolCallId: string): Record<string, string> {
-  const headers: Record<string, string> = {
-    "Authorization": `Bearer ${apiKey}`,
-    "Accept": "application/json",
+  return {
+    ...codexAuthHeaders(apiKey, authHeaders),
     "Content-Type": "application/json",
     "OpenAI-Beta": "codex-1",
     "originator": "Pi",
     "x-codex-image-turn-id": toolCallId,
   };
-  // Null values are header-deletion markers: drop them rather than sending
-  // them to fetch (which would serialize null as the literal string "null").
-  for (const [name, value] of Object.entries(authHeaders ?? {})) {
-    if (value !== null) headers[name] = value;
-  }
-  if (!header(headers, "ChatGPT-Account-ID")) {
-    const accountId = accountIdFromToken(apiKey);
-    if (accountId) headers["ChatGPT-Account-ID"] = accountId;
-  }
-  return headers;
 }
 
 async function loadReferences(paths: string[], cwd: string): Promise<Array<{ path: string; dataUrl: string }>> {
@@ -189,22 +169,6 @@ async function saveImages(images: string[], outputRoot: string, toolCallId: stri
 
 function safeName(value: string): string {
   return basename(value).replace(/[^a-zA-Z0-9_-]/g, "_") || "image";
-}
-
-function header(headers: Record<string, string>, name: string): string | undefined {
-  const target = name.toLowerCase();
-  return Object.entries(headers).find(([key]) => key.toLowerCase() === target)?.[1];
-}
-
-function accountIdFromToken(token: string): string | undefined {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return undefined;
-    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as Record<string, { chatgpt_account_id?: string } | undefined>;
-    return decoded["https://api.openai.com/auth"]?.chatgpt_account_id;
-  } catch {
-    return undefined;
-  }
 }
 
 async function responseError(response: Response): Promise<string> {

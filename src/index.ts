@@ -42,6 +42,7 @@ import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
 import { createCodexUsageController } from "./ui/codex-usage.ts";
 import { createPainterTool } from "./painter.ts";
+import { registerVoiceInput } from "./voice-input.ts";
 import registerWebSearch from "./web-search/index.ts";
 
 const WIDGET_KEY = "pi-subagents";
@@ -77,6 +78,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   const codexUsage = createCodexUsageController();
   registerPackSystemPrompt(pi);
   registerThinkingShortcuts(pi);
+  registerVoiceInput(pi);
   registerAutoRename(pi);
   registerSaveMarkdown(pi);
   registerHandoffCommand(pi);

@@ -97,6 +97,14 @@ Use `/handoff [optional next goal]` to transfer the recorded work into a fresh p
 
 Use `/create-skill [request]` for an evidence-driven interview followed by creation of a concise project-local Pi skill. Use `/save-md` to save the latest completed assistant response as Markdown in the gitignored `AgentDocs/` directory, with a Spark-generated filename.
 
+## Voice input
+
+`Ctrl+Shift+R` (or `/voice`) toggles voice input: the first press starts recording the microphone via `pw-record`, the second stops and transcribes the clip into the prompt editor. While recording, a widget above the editor shows a pulsing REC dot, an elapsed timer, and a waveform that responds to the actual microphone level (sampled from the growing WAV file). On the second press the widget switches to a transcribing spinner; when the transcript arrives it is pasted into the input box with a preview notification and the widget disappears. The footer status text is not used — the widget is the indicator.
+
+Transcription reuses the active Codex/ChatGPT login — the same OAuth credential the `painter` tool uses — via the `src/codex-auth.ts` shared helper. Audio is posted to the ChatGPT backend `transcribe` endpoint (`https://chatgpt.com/backend-api/transcribe`), so no API key or per-minute billing is involved; your ChatGPT plan's voice allowance applies. Like `backend-api/codex/images`, this is the endpoint the Codex desktop app uses and is not a stable public API — OpenAI can change it, which would need a follow-up here.
+
+Requires a `pw-record` (PipeWire) on the machine and an `openai-codex` model signed in. Recordings are written to a temp dir (`$TMPDIR/pi-voice`) and deleted after transcription; a stale pidfile kills a recorder left over from a crashed session.
+
 ## Web search
 
 The `web_search` tool searches DuckDuckGo Lite and reads URLs without a browser dependency. Its public inputs remain deliberately small: `query`, `url`, `mode`, and `section`. Result count, output budget, timeout, region, and fetch depth are local policy rather than model-controlled parameters.
