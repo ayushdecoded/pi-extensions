@@ -7,6 +7,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { codexAuthHeaders } from "../src/codex-auth.ts";
 import { createVoiceInput, sampleWavLevel, VoiceIndicator, type Recorder, type RecorderHandle } from "../src/voice-input.ts";
+import type { MediaPause } from "../src/media-pause.ts";
 
 const WAV_BYTES = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45]);
 
@@ -50,6 +51,17 @@ function fakeContext(token: string) {
     pasted,
     widgets,
     disposeWidgets: () => currentInstance?.dispose?.(),
+  };
+}
+
+function fakeMediaPause(playing = ["spotify", "youtube-music"]) {
+  const state = { pauses: 0, resumes: [] as string[][] };
+  return {
+    state,
+    mediaPause: {
+      async pause() { state.pauses += 1; return [...playing]; },
+      async resume(players: string[]) { state.resumes.push([...players]); },
+    } satisfies MediaPause,
   };
 }
 
@@ -150,13 +162,15 @@ test("toggle shows a recording widget, swaps to a transcribing widget on stop, a
     return new Response(JSON.stringify({ text: "fix the flaky test" }), { status: 200 });
   };
   const fake = fakeRecorder();
-  const voice = createVoiceInput({ fetch: fetchImpl, recorder: fake.recorder, recordDir });
+  const media = fakeMediaPause();
+  const voice = createVoiceInput({ fetch: fetchImpl, recorder: fake.recorder, recordDir, mediaPause: media.mediaPause });
   const { ctx, notifications, pasted, widgets, disposeWidgets } = fakeContext(token);
   try {
     // Start: recording widget with the wav path; no toast is shown.
     assert.equal(await voice.toggle(ctx), "recording");
     assert.equal(fake.starts.length, 1);
     assert.ok(fake.starts[0]!.endsWith(".wav"));
+    assert.equal(media.state.pauses, 1);
     assert.equal(notifications.length, 0);
     assert.equal(widgets.length, 1);
     assert.equal(widgets[0]?.key, "voice-input");
@@ -170,6 +184,8 @@ test("toggle shows a recording widget, swaps to a transcribing widget on stop, a
     assert.equal(await voice.toggle(ctx), "transcribed");
     assert.equal(fake.stops.length, 1);
     assert.equal(fake.stops[0], 4242);
+    // Media paused at start is resumed on stop (only the players that were playing).
+    assert.deepEqual(media.state.resumes, [["spotify", "youtube-music"]]);
     assert.equal(calls.length, 1);
     assert.equal(pasted.length, 1);
     assert.equal(pasted[0], "fix the flaky test");
@@ -199,7 +215,8 @@ test("toggle notifies on failure and resets state", async () => {
   const recordDir = await mkdtemp(join(tmpdir(), "pi-voice-test-"));
   const fetchImpl = async () => { throw new Error("network down"); };
   const fake = fakeRecorder();
-  const voice = createVoiceInput({ fetch: fetchImpl, recorder: fake.recorder, recordDir });
+  const media = fakeMediaPause();
+  const voice = createVoiceInput({ fetch: fetchImpl, recorder: fake.recorder, recordDir, mediaPause: media.mediaPause });
   const { ctx, notifications, pasted, widgets, disposeWidgets } = fakeContext(token);
   try {
     assert.equal(await voice.toggle(ctx), "recording");
@@ -207,6 +224,8 @@ test("toggle notifies on failure and resets state", async () => {
     assert.equal(pasted.length, 0);
     assert.equal(notifications.at(-1)?.[1], "error");
     assert.match(notifications.at(-1)?.[0] ?? "", /network down/);
+    // Media is still resumed even when transcription fails.
+    assert.deepEqual(media.state.resumes, [["spotify", "youtube-music"]]);
     // Widget was swapped to transcribing and then removed even on failure.
     assert.equal(widgets.length, 3);
     assert.equal(widgets[2]?.value, undefined);

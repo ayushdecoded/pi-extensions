@@ -7,6 +7,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { codexAuth, codexAuthHeaders } from "./codex-auth.ts";
+import { playerctlMediaPause, type MediaPause } from "./media-pause.ts";
 
 const TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe";
 const RECORD_DIR = join(tmpdir(), "pi-voice");
@@ -171,6 +172,8 @@ export type VoiceInputDependencies = {
   fetch?: typeof fetch;
   recorder?: Recorder;
   recordDir?: string;
+  /** Pauses MPRIS media while recording; defaults to playerctl. */
+  mediaPause?: MediaPause;
 };
 
 export type VoiceToggleResult = "recording" | "transcribed" | "error";
@@ -179,7 +182,8 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
   const fetchImpl = dependencies.fetch ?? fetch;
   const recorder = dependencies.recorder ?? pwRecordRecorder();
   const recordDir = dependencies.recordDir ?? RECORD_DIR;
-  let active: { handle: RecorderHandle; filePath: string } | null = null;
+  const mediaPause = dependencies.mediaPause ?? playerctlMediaPause();
+  let active: { handle: RecorderHandle; filePath: string; pausedPlayers: string[] } | null = null;
 
   /** Toggle: start recording, or stop and transcribe into the prompt editor. */
   async function toggle(ctx: ExtensionContext): Promise<VoiceToggleResult> {
@@ -192,6 +196,9 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
           ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => new VoiceIndicator({ tui, theme, mode: "transcribing" }));
         }
         await recorder.stop(current.handle);
+        // Resume media as soon as recording stops (not after transcription),
+        // matching Omarchy's native dictation: pause only while recording.
+        await mediaPause.resume(current.pausedPlayers);
         const audio = await readFile(current.filePath);
         const text = await transcribeAudio(audio, "audio/wav", ctx);
         if (text) {
@@ -215,7 +222,9 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
     await killStaleRecorder(recordDir);
     const filePath = join(recordDir, `voice-${Date.now()}-${randomUUID().slice(0, 8)}.wav`);
     const handle = recorder.start(filePath);
-    active = { handle, filePath };
+    // Snapshot and pause currently-playing MPRIS players while the mic is live.
+    const pausedPlayers = await mediaPause.pause();
+    active = { handle, filePath, pausedPlayers };
     await writeFile(join(recordDir, "pid"), `${handle.pid}\n`, { flag: "wx" }).catch(() => undefined);
     if (ctx.mode === "tui") {
       ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => new VoiceIndicator({ tui, theme, mode: "recording", filePath }));
