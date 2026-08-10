@@ -7,17 +7,18 @@ A self-contained Pi package with a main-agent identity, persistent native subage
 - No tmux, subprocesses, RPC, or detached workers.
 - Child agents use `createAgentSession()` and persistent `SessionManager` sessions.
 - Concurrency is shared across the complete delegation tree.
+- Agents share the working directory; concurrent implementation tasks need non-overlapping file or symbol ownership.
 - `delegates` controls role-scoped nesting. A child sees a `subagent` tool only when its role allows targets and the global depth limit has not been reached.
 - Nested tool schemas expose only allowed roles, and follow-ups are limited to allowed agents spawned by that delegator.
 - At maximum depth, children are created without the `subagent` tool.
-- Handles are scoped to the root parent session: `atlas-1`, `vigil-1`, and so on.
+- Handles are scoped to the root parent session: `atlas-1`, `forge-1`, `vigil-1`, and so on.
 - Reopening the parent session restores handles, history, accounting, and child transcripts.
 
 ## Main prompt
 
 The extension supplies `resources/SYSTEM.md` through `before_agent_start` when Pi has no explicit project or global `SYSTEM.md`. Pi emits that event for every submitted agent run and resets absent overrides, so the package caches one assembled replacement per base-prompt configuration and returns the same replacement each time. It is never cumulatively appended.
 
-Explicit `SYSTEM.md` files remain an escape hatch and win over the package. APPEND_SYSTEM content, project context, loaded skills, and the working directory are preserved in the assembled prompt. Child agents do not load the parent extension; they continue to receive only their isolated role prompt and allowed skills.
+Explicit `SYSTEM.md` files remain an escape hatch and win over the package. APPEND_SYSTEM content, project context, loaded skills, and the working directory are preserved in the assembled prompt. Child agents do not load the full parent extension; they receive only their isolated role prompt, allowed skills, vision hook, and the inline account-routing hook described below.
 
 ## Configuration
 
@@ -48,10 +49,22 @@ roles:
     delegates: []
     skills: []
     timeoutMinutes: 10
+  Forge:
+    description: Implementation agent for approved, bounded changes
+    model: opencode-go/deepseek-v4-flash
+    thinking: high
+    prompt: agents/forge.md
+    tools: [read, bash, edit, write]
+    delegates: []
+    skills: []
+    timeoutMinutes: 20
 presets:
   light:
-    roles: [Atlas, Vigil]
+    roles: [Atlas, Forge, Vigil]
     Atlas:
+      model: opencode-go/deepseek-v4-flash
+      thinking: high
+    Forge:
       model: opencode-go/deepseek-v4-flash
       thinking: high
     Vigil:
@@ -73,11 +86,15 @@ Prompt paths are relative to the selected `agents.yaml`. Project configuration i
 
 ## Tool
 
-Fresh agent:
+Fresh agents:
 
 ```ts
 subagent({
   agents: [{ role: "Atlas", task: "Map session ownership." }],
+});
+
+subagent({
+  agents: [{ role: "Forge", task: "Implement the approved parser change in src/parser.ts and its tests; preserve the public API and run the parser test suite." }],
 });
 ```
 
@@ -96,6 +113,21 @@ Independent array items execute concurrently. `timeoutMinutes` may be omitted to
 Use `/handoff [optional next goal]` to transfer the recorded work into a fresh parent-linked session. The command runs a normal main-agent summary turn with the existing tools and subagent orchestration available, waits for it to settle, and opens the generated chronological handoff for review. Accepting the review creates the new session and places the edited handoff in its editor; it is never submitted automatically. With no argument, the handoff continues the current work from its present state. For unusually large, compacted, or incomplete histories, the agent may use read-only Atlas subagents to inspect the saved session history.
 
 Use `/create-skill [request]` for an evidence-driven interview followed by creation of a concise project-local Pi skill. Use `/save-md` to save the latest completed assistant response as Markdown in the gitignored `AgentDocs/` directory, with a Spark-generated filename.
+
+## Experimental: plan accounts (enabled by default)
+
+Named accounts are supported for the `openai-codex` and `opencode-go` plan providers. This feature is experimental but currently enabled by default; there is no opt-in flag. Pi still owns every credential, OAuth flow, refresh, request, and retry: the extension registers native provider aliases and uses Pi's existing `/login` and `/logout` commands. Account metadata contains display names, selection, quota windows, and timestamps only; it is stored globally in `~/.pi/agent/accounts.json` (or the active Pi agent directory) with no tokens or API keys.
+
+- `/account` or `/account switch` opens a provider-first TUI picker.
+- `/account status` lists both providers and marks selected, login-required, and exhausted accounts.
+- `/account add codex Work` creates a named account and prefills native `/login` for its alias.
+- `/account switch codex Work` switches without a picker and works in print/RPC-style command execution.
+- `/account rename codex Work Personal` changes only the display name.
+- `/account remove codex Work` removes metadata after that alias has been logged out with native `/logout`.
+
+Provider arguments accept `codex`, `openai-codex`, `opencode`, `go`, or `opencode-go`. One account is selected globally per provider. Parent sessions, native subagents, vision sidecars, painter, voice transcription, headings, and footer labels all resolve through that selection. A quota failure can move only to another authenticated account of the same provider; it never crosses from Codex to OpenCode Go or vice versa. A child failover updates a parent only when the parent uses that same provider, then continues the interrupted task without replaying its original prompt.
+
+Codex quota windows are polled through the authenticated native Codex provider after turns, periodically, and near known reset times. OpenCode Go quota state comes only from provider response headers/errors. The UI says `exhausted` when reset timing is unknown and adds `resets …` only when the provider supplied a usable reset instant.
 
 ## Voice input
 
@@ -120,7 +152,7 @@ The `web_search` tool searches DuckDuckGo Lite and reads URLs without a browser 
 - Pi's native working row shows a playful, once-per-second user-perceived timer for the active prompt. Completed prompts lasting at least one minute leave a responsive, duration-themed divider in the transcript without entering LLM context; queued prompts retain their original submission time.
 - Active tool-loop tasks compact at 85% context only at a completed turn boundary, then receive a hidden continuation message after compaction. Native threshold compaction below 85% is deferred per model window; manual and overflow compaction remain untouched.
 - The above-editor widget shows only the newest batch; all earlier batches collapse into one `/agents` history link. Agent rows show role, status, elapsed time, tokens, cost, and current activity without exposing invocation prompts, handles, or invocation numbers.
-- Nested agents render as a spaced, responsive tree. Atlas and Vigil have consistent role colors; costs use green below $2, yellow below $7, and red from $7.
+- Nested agents render as a spaced, responsive tree. Atlas, Forge, and Vigil have consistent role colors; costs use green below $2, yellow below $7, and red from $7.
 - Follow-ups retain the same handle and display `↻` with their invocation number. Subagent tool calls show a prompt-free request roster, and results always show prompt-free per-invocation duration, token, and cost metrics.
 - `/agents` opens aligned batch history and nested agent trees plus a fullscreen read-only transcript viewer using Pi-native user, assistant, markdown, and thinking presentation.
 - The viewer never sends messages or cancellation commands to child agents.

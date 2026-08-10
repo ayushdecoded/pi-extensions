@@ -3,12 +3,19 @@ import {
   DefaultResourceLoader,
   getAgentDir,
   SettingsManager,
+  type InlineExtension,
   type ResourceLoader,
 } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentRole } from "../config/agents.ts";
 import { createVisionHookExtension } from "./vision-hook.ts";
 
-export async function createRoleResourceLoader(cwd: string, role: AgentRole): Promise<{
+export async function createRoleResourceLoader(
+  cwd: string,
+  role: AgentRole,
+  accountExtension?: InlineExtension,
+  routeAccountModel?: <TApi extends Api>(model: Model<TApi>) => Model<TApi>,
+): Promise<{
   loader: ResourceLoader;
   settings: SettingsManager;
 }> {
@@ -24,7 +31,15 @@ export async function createRoleResourceLoader(cwd: string, role: AgentRole): Pr
     noExtensions: true,
     noPromptTemplates: true,
     noThemes: true,
-    extensionFactories: [createVisionHookExtension(() => ({ sidecar: role.image, promptFile: role.imagePromptFile }))],
+    extensionFactories: [
+      ...(accountExtension ? [accountExtension] : []),
+      createVisionHookExtension(
+        () => ({ sidecar: role.image, promptFile: role.imagePromptFile }),
+        undefined,
+        accountExtension,
+        routeAccountModel,
+      ),
+    ],
     skillsOverride: (base) => ({
       skills: base.skills.filter((skill) => allowedSkills.has(skill.name)),
       diagnostics: base.diagnostics,

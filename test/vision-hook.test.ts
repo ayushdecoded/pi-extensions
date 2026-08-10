@@ -19,7 +19,11 @@ function hookContext(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-function captureHandler(vision: VisionConfig, describe?: (cwd: string, model: any, images: unknown[], prompt: string) => Promise<unknown>) {
+function captureHandler(
+  vision: VisionConfig,
+  describe?: (cwd: string, model: any, images: unknown[], prompt: string) => Promise<unknown>,
+  routeModel?: (model: any) => any,
+) {
   const handlers: Record<string, (event: any, ctx: any) => unknown> = {};
   const pi = {
     on: (event: string, handler: (event: any, ctx: any) => unknown) => {
@@ -30,7 +34,7 @@ function captureHandler(vision: VisionConfig, describe?: (cwd: string, model: an
     text: "A red block on white.",
     usage: { input: 50, output: 5, cacheRead: 0, cacheWrite: 0, total: 55, cost: 0.0005 },
   }));
-  (createVisionHookExtension(() => vision, describeImages as any) as any)(pi);
+  (createVisionHookExtension(() => vision, describeImages as any, undefined, routeModel) as any)(pi);
   return handlers.tool_result!;
 }
 
@@ -76,10 +80,14 @@ test("vision hook keeps the image and appends a note when no sidecar is configur
 
 test("vision hook runs the sidecar and folds its usage into the read result", async () => {
   let seen: any;
-  const handler = captureHandler({ sidecar: "opencode-go/qwen3.7-plus" }, async (cwd, model, images, prompt) => {
-    seen = { cwd, model, images, prompt };
-    return { text: "A red block on white.", usage: { input: 50, output: 5, cacheRead: 0, cacheWrite: 0, total: 55, cost: 0.0005 } };
-  });
+  const handler = captureHandler(
+    { sidecar: "opencode-go/qwen3.7-plus" },
+    async (cwd, model, images, prompt) => {
+      seen = { cwd, model, images, prompt };
+      return { text: "A red block on white.", usage: { input: 50, output: 5, cacheRead: 0, cacheWrite: 0, total: 55, cost: 0.0005 } };
+    },
+    (model) => ({ ...model, provider: "plan:opencode-go:0123456789abcdef" }),
+  );
   const readUsage = {
     input: 1,
     output: 0,
@@ -106,6 +114,7 @@ test("vision hook runs the sidecar and folds its usage into the read result", as
     },
   });
   assert.equal(seen.model.id, "qwen3.7-plus");
+  assert.equal(seen.model.provider, "plan:opencode-go:0123456789abcdef");
   assert.equal(seen.images.length, 1);
   assert.equal(seen.cwd, "/tmp");
   assert.match(seen.prompt, /exhaustively/);

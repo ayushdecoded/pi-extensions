@@ -13,9 +13,12 @@ export type SubagentHeadingGenerator = (
   signal: AbortSignal,
 ) => Promise<SubagentHeadings | undefined>;
 
-export function createSubagentHeadingGenerator(modelRegistry: ModelRegistry): SubagentHeadingGenerator {
+export function createSubagentHeadingGenerator(
+  modelRegistry: ModelRegistry,
+  codexProvider: () => string = () => MODEL_PROVIDER,
+): SubagentHeadingGenerator {
   return async (requests, signal) => {
-    const model = modelRegistry.find(MODEL_PROVIDER, MODEL_ID);
+    const model = modelRegistry.find(codexProvider(), MODEL_ID) ?? modelRegistry.find(MODEL_PROVIDER, MODEL_ID);
     if (!model) return undefined;
     const auth = await modelRegistry.getApiKeyAndHeaders(model);
     if (!auth.ok || !auth.apiKey || signal.aborted) return undefined;

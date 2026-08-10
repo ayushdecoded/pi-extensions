@@ -23,7 +23,7 @@ Trust capable models with routine mechanics. A system prompt should establish id
 - A delegated task supplies the objective, current facts, relevant files, decisions, constraints, implementation or review contract, expected result, and stop condition needed for that invocation.
 - The `subagent` tool contains only guidance common to every role. Do not move role-specific context requirements into it.
 
-Fresh agents are empty slates. Keep approved implementation in the main session. Give Vigil the intent, goals, non-goals, and decision rationale. Give Atlas a focused question and enough known context to avoid rediscovery; do not burden it with implementation context it cannot use.
+Fresh agents are empty slates. Keep scope decisions and integration in the main session. Give Forge only bounded, approved implementation with explicit ownership and acceptance criteria. Give Vigil the intent, goals, non-goals, and decision rationale. Give Atlas a focused question and enough known context to avoid rediscovery; do not burden it with implementation context it cannot use.
 
 Principles should demonstrate how to think without becoming a checklist or the boundary of the agent's judgment. Keep useful engineering principles, but remove essays that restate the same invariant across many cases.
 

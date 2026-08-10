@@ -39,6 +39,7 @@ type PainterDetails = {
 type PainterDependencies = {
   fetch?: typeof fetch;
   outputRoot?: string;
+  codexProvider?: () => string;
 };
 
 /** Creates images with the active ChatGPT/Codex OAuth subscription. */
@@ -89,7 +90,7 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
       const mode = params.mode ?? "ui";
       const references = await loadReferences(params.reference_images ?? [], ctx.cwd);
       const operation = references.length ? "edit" : "generate";
-      const auth = await resolveCodexAuth(ctx, "Painter");
+      const auth = await resolveCodexAuth(ctx, "Painter", dependencies.codexProvider?.());
       const requestSignal = timeoutSignal(signal, REQUEST_TIMEOUT_MS);
       try {
         const response = await fetchImpl(`${CODEX_IMAGES_URL}/${operation === "edit" ? "edits" : "generations"}`, {

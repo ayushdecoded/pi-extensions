@@ -174,6 +174,8 @@ export type VoiceInputDependencies = {
   recordDir?: string;
   /** Pauses MPRIS media while recording; defaults to playerctl. */
   mediaPause?: MediaPause;
+  /** Selected Codex account provider; authentication still resolves through Pi. */
+  codexProvider?: () => string;
 };
 
 export type VoiceToggleResult = "recording" | "transcribed" | "error";
@@ -234,7 +236,7 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
 
   /** Transcribe audio via the ChatGPT backend endpoint using the Codex login. */
   async function transcribeAudio(audio: Uint8Array, mimeType: string, ctx: ExtensionContext, language?: string): Promise<string> {
-    const auth = await codexAuth(ctx, "Voice input");
+    const auth = await codexAuth(ctx, "Voice input", dependencies.codexProvider?.());
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(audio)], { type: mimeType }), "recording.wav");
     if (language) form.append("language", language);

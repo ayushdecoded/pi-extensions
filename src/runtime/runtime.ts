@@ -310,7 +310,12 @@ export class SubagentRuntime {
       lease = await this.scheduler.acquire(controller.signal);
       controller.signal.throwIfAborted();
 
-      const { loader, settings } = await createRoleResourceLoader(this.options.cwd, resolved.role);
+      const { loader, settings } = await createRoleResourceLoader(
+        this.options.cwd,
+        resolved.role,
+        this.options.accountExtension,
+        this.options.routeAccountModel,
+      );
       controller.signal.throwIfAborted();
       const leaseForNested = lease;
       const allowedDelegates = new Set(resolved.role.delegates.map((name) => name.toLowerCase()));
@@ -348,7 +353,8 @@ export class SubagentRuntime {
           }),
         );
       }
-      const model = this.findModel(resolved.role.model);
+      const baseModel = this.findModel(resolved.role.model);
+      const model = this.options.routeAccountModel?.(baseModel) ?? baseModel;
 
       const created = await createAgentSession({
         cwd: this.options.cwd,

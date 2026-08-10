@@ -57,7 +57,7 @@ test("before_agent_start returns one cached replacement and honors explicit SYST
 test("bundled defaults stay synchronized with the project development copies", async () => {
   const pairs = [
     [".pi/agents.yaml", "resources/agents.yaml"],
-    ...["atlas", "vigil", "vision"].map((role) => [
+    ...["atlas", "forge", "vigil", "vision"].map((role) => [
       `.pi/agents/${role}.md`,
       `resources/agents/${role}.md`,
     ]),

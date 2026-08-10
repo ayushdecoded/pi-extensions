@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext, SessionEntry, Theme, ThemeColor } 
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { SubagentRuntime } from "../runtime/runtime.ts";
 import { footerUsageTotals } from "./accounting.ts";
+import { canonicalProviderId } from "../accounts/providers.ts";
 
 export type FooterController = {
   install(ctx: ExtensionContext, runtime: SubagentRuntime): void;
@@ -10,7 +11,10 @@ export type FooterController = {
   dispose(): void;
 };
 
-export function createFooterController(pi: ExtensionAPI): FooterController {
+export function createFooterController(
+  pi: ExtensionAPI,
+  options: { accountName?: (providerId: string) => string | undefined } = {},
+): FooterController {
   let render: (() => void) | undefined;
   let invalidateAccounting: (() => void) | undefined;
   let disposeRuntime: (() => void) | undefined;
@@ -66,7 +70,13 @@ export function createFooterController(pi: ExtensionAPI): FooterController {
               tokens: tokenLabel(totals.leaf, totals.cacheHit, theme),
               costs: costLabel(totals.leaf.cost, totals.tree.cost, theme),
             };
-            const right = modelLabel(ctx, pi.getThinkingLevel(), theme, codexWeeklyRemaining);
+            const right = modelLabel(
+              ctx,
+              pi.getThinkingLevel(),
+              theme,
+              codexWeeklyRemaining,
+              ctx.model ? options.accountName?.(ctx.model.provider) : undefined,
+            );
             return [responsiveLine(segments, right, width, theme)];
           },
         };
@@ -132,12 +142,19 @@ export function costLabel(leaf: number, tree: number, theme: Theme): string {
   ].join("    ");
 }
 
-export function modelLabel(ctx: ExtensionContext, thinking: string, theme: Theme, codexWeeklyRemaining?: number): string {
+export function modelLabel(
+  ctx: ExtensionContext,
+  thinking: string,
+  theme: Theme,
+  codexWeeklyRemaining?: number,
+  accountName?: string,
+): string {
   const provider = shortProvider(ctx.model?.provider ?? "");
   const model = shortModel(ctx.model?.id ?? "no-model");
+  const providerText = accountName ? `${provider}/${accountName}` : provider;
   const providerLabel = provider === "codex"
-    ? codexProviderLabel(codexWeeklyRemaining, theme)
-    : provider ? theme.fg("dim", provider) : "";
+    ? `${codexProviderLabel(codexWeeklyRemaining, theme)}${accountName ? theme.fg("dim", `/${accountName}`) : ""}`
+    : providerText ? theme.fg("dim", providerText) : "";
   return [
     providerLabel,
     theme.bold(theme.fg("accent", model)),
@@ -216,7 +233,11 @@ function codexProviderLabel(remaining: number | undefined, theme: Theme): string
 }
 
 function shortProvider(provider: string): string {
-  return provider.replace(/^openai-codex$/, "codex").replace(/^openrouter$/, "or").replace(/^anthropic$/, "anth");
+  return canonicalProviderId(provider)
+    .replace(/^openai-codex$/, "codex")
+    .replace(/^opencode-go$/, "opencode-go")
+    .replace(/^openrouter$/, "or")
+    .replace(/^anthropic$/, "anth");
 }
 
 function shortModel(model: string): string {

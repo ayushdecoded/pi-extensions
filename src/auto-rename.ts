@@ -4,7 +4,6 @@ import { Text } from "@earendil-works/pi-tui";
 
 const MODEL_PROVIDER = "openai-codex";
 const MODEL_ID = "gpt-5.3-codex-spark";
-const USER_MESSAGE_THRESHOLD = 10;
 const WIDGET_KEY = "pi-auto-rename";
 const COMMAND_WIDGET_KEY = "pi-auto-rename-command";
 const WIDGET_DURATION_MS = 45_000;
@@ -14,7 +13,7 @@ type ConversationMessage = { role: "User" | "Assistant" | "Summary"; text: strin
 type TitleGenerator = (transcript: string, ctx: ExtensionContext, signal: AbortSignal, instruction?: string) => Promise<string | undefined>;
 const MAX_CONTEXT_PERCENT = 80;
 
-/** Registers one ephemeral, post-settlement title generation attempt for new chats. */
+/** Registers one ephemeral title generation attempt on a new chat's first prompt. */
 export function registerAutoRename(pi: ExtensionAPI): void {
   const controller = new AutoRenameController(pi, generateTitle);
   const commandAbortControllers = new Set<AbortController>();
@@ -41,8 +40,7 @@ export function registerAutoRename(pi: ExtensionAPI): void {
     }
   };
   pi.on("session_start", (event, ctx) => controller.startSession(event.reason, ctx));
-  pi.on("message_end", (_event, ctx) => controller.observeMessages(ctx));
-  pi.on("agent_settled", (_event, ctx) => { void controller.settle(ctx); });
+  pi.on("before_agent_start", (event, ctx) => { void controller.renameFromFirstPrompt(event.prompt, ctx); });
   pi.on("session_info_changed", (event) => controller.observeSessionName(event.name));
   pi.on("session_shutdown", (_event, ctx) => {
     for (const commandAbortController of commandAbortControllers) commandAbortController.abort();
@@ -72,7 +70,7 @@ export function registerAutoRename(pi: ExtensionAPI): void {
         return;
       }
 
-      const transcript = formatConversation(cleanTitleContext(ctx.sessionManager.buildContextEntries()));
+      const transcript = formatConversation(cleanTitleContext(entriesSinceLastCompaction(ctx.sessionManager.getBranch())));
       if (!transcript) {
         commandFeedback(ctx, "📖 There is no conversation story for Spark to skim yet.", "warning", "warning");
         return;
@@ -112,7 +110,6 @@ export function registerAutoRename(pi: ExtensionAPI): void {
 
 export class AutoRenameController {
   private enabled = false;
-  private pending = false;
   private requested = false;
   private manualName = false;
   private applyingName = false;
@@ -134,23 +131,13 @@ export class AutoRenameController {
     this.manualName = Boolean(this.pi.getSessionName());
   }
 
-  observeMessages(ctx: ExtensionContext): void {
-    if (!this.enabled || this.pending || this.requested || this.manualName) return;
-    if (userMessageCount(ctx.sessionManager.getBranch()) >= USER_MESSAGE_THRESHOLD) this.pending = true;
-  }
-
-  async settle(ctx: ExtensionContext): Promise<void> {
-    if (!this.enabled || this.requested || this.manualName) return;
-    // message_end is emitted before some Pi session-manager updates. The settled
-    // branch is authoritative, so it is the final gate before naming.
-    if (!this.pending && userMessageCount(ctx.sessionManager.getBranch()) >= USER_MESSAGE_THRESHOLD) this.pending = true;
-    if (!this.pending) return;
-    this.pending = false;
+  async renameFromFirstPrompt(prompt: string, ctx: ExtensionContext): Promise<void> {
+    if (!this.enabled || this.requested || this.manualName || this.pi.getSessionName()) return;
+    const text = prompt.trim();
+    if (!text) return;
     this.requested = true;
 
-    const transcript = formatConversation(cleanConversation(ctx.sessionManager.getBranch()));
-    if (!transcript) return;
-
+    const transcript = formatConversation([{ role: "User", text }]);
     const controller = new AbortController();
     this.abortController = controller;
     try {
@@ -185,7 +172,6 @@ export class AutoRenameController {
     this.widgetTimer = undefined;
     ctx.ui.setWidget(WIDGET_KEY, undefined);
     this.enabled = false;
-    this.pending = false;
     this.requested = false;
     this.manualName = false;
     this.applyingName = false;
@@ -216,14 +202,15 @@ export function cleanConversation(entries: readonly SessionEntry[]): Conversatio
   return messages;
 }
 
-export function userMessageCount(entries: readonly SessionEntry[]): number {
-  return entries.reduce(
-    (count, entry) => count + (entry.type === "message" && entry.message.role === "user" ? 1 : 0),
-    0,
-  );
+/** Keeps the latest compaction summary and everything recorded after it. */
+export function entriesSinceLastCompaction(entries: readonly SessionEntry[]): readonly SessionEntry[] {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    if (entries[index]?.type === "compaction") return entries.slice(index);
+  }
+  return entries;
 }
 
-/** Builds the compacted active context for explicit, on-demand renaming. */
+/** Builds the filtered conversation used for explicit, on-demand renaming. */
 export function cleanTitleContext(entries: readonly SessionEntry[]): ConversationMessage[] {
   const messages: ConversationMessage[] = [];
   for (const entry of entries) {

@@ -40,8 +40,9 @@ import { createEmojiAutocompleteProvider } from "./ui/emoji-autocomplete.ts";
 import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
-import { createCodexUsageController } from "./ui/codex-usage.ts";
 import { createPainterTool } from "./painter.ts";
+import { createAccountController, type AccountController } from "./accounts/controller.ts";
+import { registerAccountCommands } from "./accounts/commands.ts";
 import { registerVoiceInput } from "./voice-input.ts";
 import registerWebSearch from "./web-search/index.ts";
 
@@ -74,18 +75,28 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   let currentConfig: AgentsConfig | undefined;
   let registered = false;
   const activeModeStore = createActiveModeStore();
-  const footer = createFooterController(pi);
-  const codexUsage = createCodexUsageController();
+  const accounts = createAccountController(pi);
+  const footer = createFooterController(pi, {
+    accountName: (providerId) => {
+      const account = accounts.accountForProviderId(providerId);
+      return account?.id === "default" ? undefined : account?.name;
+    },
+  });
+  const stopAccounts = accounts.coordinator.subscribe(() => {
+    footer.setCodexWeeklyRemaining(codexWeeklyRemaining(accounts));
+    footer.requestRender();
+  });
   registerPackSystemPrompt(pi);
   registerThinkingShortcuts(pi);
-  registerVoiceInput(pi);
+  registerAccountCommands(pi, accounts);
+  registerVoiceInput(pi, { codexProvider: () => accounts.selectedProviderId("openai-codex") });
   registerAutoRename(pi);
   registerSaveMarkdown(pi);
   registerHandoffCommand(pi);
   registerPromptDuration(pi);
   registerProactiveCompaction(pi);
   registerWebSearch(pi);
-  pi.registerTool(createPainterTool());
+  pi.registerTool(createPainterTool({ codexProvider: () => accounts.selectedProviderId("openai-codex") }));
 
   // The main session's read tool also rides the vision hook: when the main model
   // is text-only and reads an image, the sidecar description is appended to the
@@ -94,7 +105,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   pi.on("tool_result", createVisionHookHandler(() => ({
     sidecar: currentConfig?.defaults.image,
     promptFile: currentConfig?.defaults.imagePromptFile,
-  })));
+  }), undefined, accounts.childExtension, accounts.routeModel));
 
   const activate = async (ctx: ExtensionContext, config: AgentsConfig, activeMode?: string): Promise<void> => {
     const previous = runtime;
@@ -113,7 +124,12 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         modelRegistry: ctx.modelRegistry,
         reservedHandles: new Set(allState.agents.keys()),
         appendEvent: (event: SubagentEvent) => pi.appendEntry(SUBAGENT_ENTRY_TYPE, event),
-        generateHeadings: createSubagentHeadingGenerator(ctx.modelRegistry),
+        generateHeadings: createSubagentHeadingGenerator(
+          ctx.modelRegistry,
+          () => accounts.selectedProviderId("openai-codex"),
+        ),
+        accountExtension: accounts.childExtension,
+        routeAccountModel: accounts.routeModel,
       },
       activeState,
     );
@@ -190,7 +206,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       );
     }
     await activate(ctx, config, activeMode);
-    codexUsage.start(ctx, (remaining) => footer.setCodexWeeklyRemaining(remaining));
+    footer.setCodexWeeklyRemaining(codexWeeklyRemaining(accounts));
     if (!registered) {
       registerSubagentTool({ ...config, roles: resolvePreset(config, activeMode).roles });
       registered = true;
@@ -277,7 +293,6 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
   pi.on("message_end", () => {
     footer.requestRender(true);
-    void codexUsage.refresh();
   });
   pi.on("turn_start", () => footer.requestRender());
   pi.on("turn_end", () => footer.requestRender());
@@ -286,11 +301,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   pi.on("model_select", () => footer.requestRender());
   pi.on("thinking_level_select", () => footer.requestRender());
 
-  pi.on("session_shutdown", async (_event, ctx) => {
+  pi.on("session_shutdown", async (event, ctx) => {
     ctx.ui.setWidget(WIDGET_KEY, undefined);
     ctx.ui.setFooter(undefined);
     ctx.ui.setHeader(undefined);
-    codexUsage.stop();
+    if (event.reason === "quit") {
+      accounts.dispose();
+      stopAccounts();
+    }
     footer.dispose();
     const active = runtime;
     runtime = undefined;
@@ -302,4 +320,12 @@ function notifyError(ctx: ExtensionContext, error: unknown): void {
   if (!ctx.hasUI) return;
   const message = error instanceof Error ? error.message : String(error);
   ctx.ui.notify(`Subagent extension unavailable: ${message}`, "error");
+}
+
+function codexWeeklyRemaining(accounts: AccountController): number | undefined {
+  const selected = accounts.accounts("openai-codex").find((account) => account.selected);
+  const weekly = selected?.limits.find((window) =>
+    window.windowSeconds === 604_800 || window.name.toLowerCase().includes("week"),
+  );
+  return weekly?.usedPercent === undefined ? undefined : Math.max(0, Math.min(100, 100 - weekly.usedPercent));
 }

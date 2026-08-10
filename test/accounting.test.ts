@@ -48,6 +48,14 @@ test("footer costs follow session budget thresholds and model identity remains d
   assert.match(costLabel(24.9, 50.1, theme), /↳ \$24\.9<\/warning>    <muted>◆ \$50\.1/);
   const label = modelLabel({ model: { provider: "openai-codex", id: "gpt-5.6-sol" } } as any, "medium", theme);
   assert.match(label, /codex.*  ·  .*gpt-5\.6-sol.*  ·  .*<thinkingMedium>medium/);
+  const named = modelLabel(
+    { model: { provider: "plan:opencode-go:0123456789abcdef", id: "deepseek-v4-flash" } } as any,
+    "high",
+    theme,
+    undefined,
+    "Go Work",
+  );
+  assert.match(named, /opencode-go\/Go Work.*deepseek-v4-flash/);
 });
 
 test("footer reuses accounting reads until session or runtime revision invalidation", () => {

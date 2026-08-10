@@ -100,12 +100,19 @@ test("uses bundled package defaults only when project and global configs are abs
   const config = loadAgentsConfig({ cwd, homeDir });
 
   assert.match(config.path, /resources\/agents\.yaml$/);
-  assert.deepEqual(config.roles.map((role) => role.name), ["Atlas", "Vigil"]);
+  assert.deepEqual(config.roles.map((role) => role.name), ["Atlas", "Forge", "Vigil"]);
   assert.ok(config.roles.every((role) => role.promptFile.includes(`${path.sep}resources${path.sep}agents${path.sep}`)));
   const atlas = config.roles.find((role) => role.name === "Atlas");
+  const forge = config.roles.find((role) => role.name === "Forge");
   const vigil = config.roles.find((role) => role.name === "Vigil");
   assert.deepEqual(atlas?.tools, ["read", "bash", "web_search"]);
   assert.match(atlas?.description ?? "", /focused fact-finding.*expected evidence/);
+  assert.equal(forge?.model, "opencode-go/deepseek-v4-flash");
+  assert.equal(forge?.thinking, "high");
+  assert.deepEqual(forge?.tools, ["read", "bash", "edit", "write"]);
+  assert.deepEqual(forge?.delegates, []);
+  assert.equal(forge?.timeoutMinutes, 20);
+  assert.match(forge?.description ?? "", /approved, bounded changes.*file or symbol ownership/s);
   assert.match(vigil?.description ?? "", /consequential architecture, designs, and implementation milestones/);
   assert.match(vigil?.description ?? "", /materially affect a decision or expose a meaningful risk/);
   assert.match(vigil?.description ?? "", /Not for routine checks or confirmation of completed work/);
@@ -115,11 +122,13 @@ test("uses bundled package defaults only when project and global configs are abs
   assert.equal(config.defaultPreset, "deep");
   assert.equal(config.defaults.image, "opencode-go/qwen3.7-plus");
   assert.match(config.defaults.imagePromptFile ?? "", /resources[\\/]agents[\\/]vision\.md$/);
-  assert.deepEqual(light?.roleNames, ["Atlas", "Vigil"]);
-  assert.deepEqual(deep?.roleNames, ["Atlas", "Vigil"]);
+  assert.deepEqual(light?.roleNames, ["Atlas", "Forge", "Vigil"]);
+  assert.deepEqual(deep?.roleNames, ["Atlas", "Forge", "Vigil"]);
   assert.deepEqual(light?.overrides.get("Atlas"), { model: "opencode-go/deepseek-v4-flash", thinking: "high" });
+  assert.deepEqual(light?.overrides.get("Forge"), { model: "opencode-go/deepseek-v4-flash", thinking: "high" });
   assert.deepEqual(light?.overrides.get("Vigil"), { model: "opencode-go/deepseek-v4-flash", thinking: "max" });
   assert.deepEqual(deep?.overrides.get("Atlas"), { model: "opencode-go/deepseek-v4-flash", thinking: "high" });
+  assert.deepEqual(deep?.overrides.get("Forge"), { model: "opencode-go/deepseek-v4-flash", thinking: "high" });
   assert.deepEqual(deep?.overrides.get("Vigil"), { model: "openai-codex/gpt-5.6-sol", thinking: "high" });
 });
 

@@ -1,4 +1,5 @@
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { InlineExtension, ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentRole, AgentsConfig } from "../config/agents.ts";
 import type { SubagentHeadingGenerator } from "../subagent-headings.ts";
 
@@ -127,6 +128,10 @@ export type RuntimeOptions = {
   reservedHandles?: Set<string>;
   appendEvent: (event: SubagentEvent) => void;
   generateHeadings?: SubagentHeadingGenerator;
+  /** Shared account-routing extension injected into native child sessions. */
+  accountExtension?: InlineExtension;
+  /** Resolve a supported model onto the globally selected plan account. */
+  routeAccountModel?: <TApi extends Api>(model: Model<TApi>) => Model<TApi>;
   /** Name of the active preset; roles resolve through it. Defaults to default_preset. */
   activeMode?: string;
 };

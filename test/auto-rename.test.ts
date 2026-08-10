@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { AutoRenameController, cleanConversation, cleanTitleContext, formatConversation, normalizeTitle, registerAutoRename, userMessageCount } from "../src/auto-rename.ts";
+import { AutoRenameController, cleanConversation, cleanTitleContext, entriesSinceLastCompaction, formatConversation, normalizeTitle, registerAutoRename } from "../src/auto-rename.ts";
 
 const entries = [
   message("user", "Help refactor auth"),
@@ -25,22 +25,20 @@ test("clean conversation keeps only user prompts and final assistant text", () =
   assert.doesNotMatch(formatConversation(conversation), /verbose|toolUse|call-1/i);
 });
 
-test("counts only user prompts toward the naming threshold", () => {
-  assert.equal(userMessageCount(entries as any), 3);
-  assert.equal(userMessageCount(renameEntries() as any), 10);
-});
-
-test("title context retains the compaction summary but excludes tools and thinking", () => {
-  const context = cleanTitleContext([
-    { type: "compaction", summary: "Earlier work established the CRM intake design." },
+test("manual title context starts at the latest compaction and excludes tools and thinking", () => {
+  const context = cleanTitleContext(entriesSinceLastCompaction([
+    message("user", "Old conversation that was compacted"),
+    { type: "compaction", summary: "First summary that was later replaced." },
+    message("user", "Also compacted later"),
+    { type: "compaction", summary: "Latest summary established the CRM intake design." },
     message("user", "Name the remaining design work"),
     message("assistant", "I will summarize the M8 API plan", "stop"),
     message("assistant", "", "toolUse", [{ type: "toolCall", id: "call-2", name: "read", arguments: {} }]),
     toolResult("Never send this tool output to Spark"),
-  ] as any);
+  ] as any));
 
   assert.deepEqual(context, [
-    { role: "Summary", text: "Earlier work established the CRM intake design." },
+    { role: "Summary", text: "Latest summary established the CRM intake design." },
     { role: "User", text: "Name the remaining design work" },
     { role: "Assistant", text: "I will summarize the M8 API plan" },
   ]);
@@ -58,7 +56,7 @@ test("auto-rename rejects an instruction that pushes the complete Spark request 
     hasUI: true,
     getContextUsage: () => ({ percent: 1 }),
     modelRegistry: { find: () => ({ contextWindow: 128_000 }) },
-    sessionManager: { buildContextEntries: () => [message("user", "short context")] },
+    sessionManager: { getBranch: () => [message("user", "short context")] },
     ui: { notify: (message: string) => notices.push(message) },
   } as unknown as ExtensionContext;
 
@@ -72,18 +70,16 @@ test("normalizes title-only model output", () => {
   assert.equal(normalizeTitle(undefined), undefined);
 });
 
-test("names a new chat only after settlement and removes the widget after expiry", async () => {
-  const harness = createHarness(renameEntries());
+test("names a new chat from its first prompt and removes the widget after expiry", async () => {
+  const harness = createHarness([]);
   const controller = new AutoRenameController(harness.pi as any, async (transcript) => {
-    assert.match(transcript, /Compatibility is preserved/);
+    assert.equal(transcript, "User: Help refactor auth while preserving compatibility");
     return "Auth compatibility refactor";
   }, 1);
 
   controller.startSession("new", harness.ctx);
-  controller.observeMessages(harness.ctx);
-  assert.equal(harness.name, undefined);
+  await controller.renameFromFirstPrompt("Help refactor auth while preserving compatibility", harness.ctx);
 
-  await controller.settle(harness.ctx);
   assert.equal(harness.name, "Auth compatibility refactor");
   const widget = harness.widgets.at(-1)?.value as string[];
   assert.match(widget[0]!, /Renamed/);
@@ -92,20 +88,18 @@ test("names a new chat only after settlement and removes the widget after expiry
   assert.equal(harness.widgets.at(-1)?.value, undefined);
 });
 
-test("settled branch is authoritative when message_end has not yet exposed the triggering message", async () => {
-  const branch: unknown[] = [{ type: "model_change" }, { type: "thinking_level_change" }];
-  const harness = createHarness(branch);
+test("blank startup sessions are named from their first prompt", async () => {
+  const harness = createHarness([{ type: "model_change" }, { type: "thinking_level_change" }]);
   const controller = new AutoRenameController(harness.pi as any, async () => "Weather coffee chat naming", 1);
 
   controller.startSession("startup", harness.ctx);
-  branch.push(...renameEntries());
-  await controller.settle(harness.ctx);
+  await controller.renameFromFirstPrompt("Discuss weather over coffee", harness.ctx);
 
   assert.equal(harness.name, "Weather coffee chat naming");
 });
 
 test("a manual name aborts a pending automatic title and wins", async () => {
-  const harness = createHarness(renameEntries());
+  const harness = createHarness(entries);
   let resolveTitle!: (title: string) => void;
   const controller = new AutoRenameController(harness.pi as any, async (_transcript, _ctx, signal) => {
     assert.equal(signal.aborted, false);
@@ -113,8 +107,7 @@ test("a manual name aborts a pending automatic title and wins", async () => {
   });
 
   controller.startSession("new", harness.ctx);
-  controller.observeMessages(harness.ctx);
-  const pending = controller.settle(harness.ctx);
+  const pending = controller.renameFromFirstPrompt("Refactor authentication compatibility", harness.ctx);
   await Promise.resolve();
   controller.observeSessionName("My manual title");
   resolveTitle("Generated title");
@@ -125,22 +118,14 @@ test("a manual name aborts a pending automatic title and wins", async () => {
 
 test("does not retroactively title resumed or forked sessions", async () => {
   for (const reason of ["resume", "fork"] as const) {
-    const harness = createHarness(renameEntries());
+    const harness = createHarness(entries);
     let calls = 0;
     const controller = new AutoRenameController(harness.pi as any, async () => { calls += 1; return "Never used"; });
     controller.startSession(reason, harness.ctx);
-    controller.observeMessages(harness.ctx);
-    await controller.settle(harness.ctx);
+    await controller.renameFromFirstPrompt("Do not rename this old session", harness.ctx);
     assert.equal(calls, 0);
   }
 });
-
-function renameEntries() {
-  return [
-    ...entries,
-    ...Array.from({ length: 7 }, (_, index) => message("user", `Additional user prompt ${index + 1}`)),
-  ];
-}
 
 function createHarness(branch: unknown[]) {
   let name: string | undefined;

@@ -1,5 +1,6 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ProviderHeaders } from "@earendil-works/pi-ai";
+import { canonicalProviderId } from "./accounts/providers.ts";
 
 /**
  * Shared ChatGPT/Codex OAuth helpers for pack features that call OpenAI's
@@ -7,11 +8,17 @@ import type { ProviderHeaders } from "@earendil-works/pi-ai";
  * painter uses for image generation).
  */
 
-/** Resolve the ChatGPT access token and account headers for the active Codex login. */
-export async function codexAuth(ctx: ExtensionContext, feature = "This feature"): Promise<{ apiKey: string; headers?: ProviderHeaders }> {
-  const model = ctx.model?.provider === "openai-codex"
+/** Resolve the ChatGPT access token and account headers for the selected Codex login. */
+export async function codexAuth(
+  ctx: ExtensionContext,
+  feature = "This feature",
+  preferredProviderId?: string,
+): Promise<{ apiKey: string; headers?: ProviderHeaders }> {
+  const model = ctx.model && canonicalProviderId(ctx.model.provider) === "openai-codex"
     ? ctx.model
-    : ctx.modelRegistry.getAll().find((candidate) => candidate.provider === "openai-codex");
+    : preferredProviderId
+      ? ctx.modelRegistry.getAll().find((candidate) => candidate.provider === preferredProviderId)
+      : ctx.modelRegistry.getAll().find((candidate) => canonicalProviderId(candidate.provider) === "openai-codex");
   if (!model) throw new Error(`${feature} requires an OpenAI Codex login. Select an openai-codex model and sign in first.`);
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok || !auth.apiKey) throw new Error(`${feature} could not access Codex OAuth credentials${auth.ok ? "." : `: ${auth.error}`}`);

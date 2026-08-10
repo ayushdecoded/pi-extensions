@@ -18,6 +18,17 @@ roles:
     delegates: []
     skills: []
     timeoutMinutes: 10
+  Forge:
+    description: >-
+      Implementation agent for approved, bounded changes. Provide the goal, relevant context, file or symbol
+      ownership, acceptance criteria, and stop condition. Not for design, research, review, or overlapping work.
+    model: opencode-go/deepseek-v4-flash
+    thinking: high
+    prompt: agents/forge.md
+    tools: [read, bash, edit, write]
+    delegates: []
+    skills: []
+    timeoutMinutes: 20
   Vigil:
     description: >-
       Adversarial advisor for consequential architecture, designs, and implementation milestones. Use when
@@ -33,16 +44,22 @@ roles:
     timeoutMinutes: 20
 presets:
   light:
-    roles: [Atlas, Vigil]
+    roles: [Atlas, Forge, Vigil]
     Atlas:
+      model: opencode-go/deepseek-v4-flash
+      thinking: high
+    Forge:
       model: opencode-go/deepseek-v4-flash
       thinking: high
     Vigil:
       model: opencode-go/deepseek-v4-flash
       thinking: max
   deep:
-    roles: [Atlas, Vigil]
+    roles: [Atlas, Forge, Vigil]
     Atlas:
+      model: opencode-go/deepseek-v4-flash
+      thinking: high
+    Forge:
       model: opencode-go/deepseek-v4-flash
       thinking: high
     Vigil:

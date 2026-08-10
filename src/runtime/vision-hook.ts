@@ -7,6 +7,7 @@ import {
   SettingsManager,
   type ExtensionContext,
   type ExtensionFactory,
+  type InlineExtension,
   type ResourceLoader,
   type ToolResultEvent,
 } from "@earendil-works/pi-coding-agent";
@@ -28,6 +29,8 @@ export type VisionConfig = {
   sidecar?: string;
   promptFile?: string;
 };
+
+type RouteAccountModel = <TApi extends Api>(model: Model<TApi>) => Model<TApi>;
 
 /** pi-ai's native usage shape as carried on tool result messages. */
 type NativeUsage = {
@@ -53,6 +56,8 @@ type NativeUsage = {
 export function createVisionHookHandler(
   getVision: () => VisionConfig,
   describe: DescribeImages = describeImages,
+  accountExtension?: InlineExtension,
+  routeAccountModel?: RouteAccountModel,
 ): (event: ToolResultEvent, ctx: ExtensionContext) => Promise<{ content: (TextContent | ImageContent)[]; usage?: NativeUsage } | void> {
   return async (event, ctx) => {
     if (event.toolName !== "read") return;
@@ -75,7 +80,14 @@ export function createVisionHookHandler(
 
     const prompt = promptFile ? readFileSync(promptFile, "utf8").trim() : VISION_PROMPT;
     try {
-      const { text, usage } = await describe(ctx.cwd, sidecar, images, prompt, ctx.signal ?? undefined);
+      const { text, usage } = await describe(
+        ctx.cwd,
+        routeAccountModel?.(sidecar) ?? sidecar,
+        images,
+        prompt,
+        ctx.signal ?? undefined,
+        accountExtension,
+      );
       return {
         content: appendNote(event.content, `<image analysis>\n${text}\n</image analysis>`),
         usage: addNativeUsage(event.usage, toNativeUsage(usage)),
@@ -88,9 +100,14 @@ export function createVisionHookHandler(
 }
 
 /** Wrap the shared handler as a minimal inline extension for child sessions. */
-export function createVisionHookExtension(getVision: () => VisionConfig, describe?: DescribeImages): ExtensionFactory {
+export function createVisionHookExtension(
+  getVision: () => VisionConfig,
+  describe?: DescribeImages,
+  accountExtension?: InlineExtension,
+  routeAccountModel?: RouteAccountModel,
+): ExtensionFactory {
   return (pi) => {
-    pi.on("tool_result", createVisionHookHandler(getVision, describe));
+    pi.on("tool_result", createVisionHookHandler(getVision, describe, accountExtension, routeAccountModel));
   };
 }
 
@@ -106,6 +123,7 @@ async function describeImages(
   images: ImageContent[],
   prompt: string,
   signal?: AbortSignal,
+  accountExtension?: InlineExtension,
 ): Promise<{ text: string; usage: Usage }> {
   const agentDir = getAgentDir();
   const settings = SettingsManager.create(cwd, agentDir, { projectTrusted: true });
@@ -115,7 +133,7 @@ async function describeImages(
     model,
     thinkingLevel: VISION_THINKING,
     noTools: "all",
-    resourceLoader: await createSidecarResourceLoader(cwd, settings),
+    resourceLoader: await createSidecarResourceLoader(cwd, settings, accountExtension),
     sessionManager: SessionManager.inMemory(cwd),
     settingsManager: settings,
   });
@@ -137,13 +155,18 @@ async function describeImages(
 }
 
 /** A bare loader for throwaway sidecar sessions that must not see role prompts or skills. */
-async function createSidecarResourceLoader(cwd: string, settings: SettingsManager): Promise<ResourceLoader> {
+async function createSidecarResourceLoader(
+  cwd: string,
+  settings: SettingsManager,
+  accountExtension?: InlineExtension,
+): Promise<ResourceLoader> {
   const agentDir = getAgentDir();
   const loader = new DefaultResourceLoader({
     cwd,
     agentDir,
     settingsManager: settings,
     noExtensions: true,
+    extensionFactories: accountExtension ? [accountExtension] : [],
     noPromptTemplates: true,
     noThemes: true,
     systemPromptOverride: () => undefined,
