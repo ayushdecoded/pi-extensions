@@ -2,15 +2,31 @@ import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { AgentsConfig } from "./config/agents.ts";
-import type { BatchResult, SubagentRequest } from "./runtime/types.ts";
+import type {
+  BackgroundBatchLaunch,
+  BackgroundBatchReceipt,
+  BatchResult,
+  SubagentRequest,
+  SubagentToolResult,
+} from "./runtime/types.ts";
 import { roleText } from "./ui/roles.ts";
 
 const TOOL_DESCRIPTION =
   "Delegate only bounded, verifiable work when specialization, independent judgment, or independent parallelism justifies coordination. Keep routine execution, inspection, directly verifiable validation, small tasks, and repeated discovery in the main session; do not delegate merely for confirmation or extra confidence. Fresh agents have no context. Include the objective, evidence, paths and symbols, completed work, decisions and rationale, constraints, boundaries, expected result, and stop condition. For parallel calls, share baseline context and assign distinct responsibilities; duplicate only for intentional verification. Resume useful contexts and integrate results yourself.";
 
 export type SubagentExecutor = (requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void) => Promise<BatchResult>;
+export type BackgroundSubagentExecutor = (requests: SubagentRequest[]) => BackgroundBatchLaunch;
 
-export function createSubagentTool(config: AgentsConfig, executeBatch: SubagentExecutor): ToolDefinition<any, BatchResult> {
+export type SubagentToolOptions = {
+  /** Root tools may detach a batch. Nested tools intentionally omit this capability. */
+  startBackgroundBatch?: BackgroundSubagentExecutor;
+};
+
+export function createSubagentTool(
+  config: AgentsConfig,
+  executeBatch: SubagentExecutor,
+  options: SubagentToolOptions = {},
+): ToolDefinition<any, SubagentToolResult> {
   const roleNames = config.roles.map((role) => role.name);
   const roleDescription = [
     "Configured role for a fresh agent.",
@@ -56,6 +72,14 @@ export function createSubagentTool(config: AgentsConfig, executeBatch: SubagentE
         maxItems: 10,
         description: "Fresh agents and follow-ups to run concurrently in this call.",
       }),
+      ...(options.startBackgroundBatch
+        ? {
+            background: Type.Optional(Type.Boolean({
+              description:
+                "Root session only. Launch this batch and return immediately; one aggregate result is delivered after every run settles.",
+            })),
+          }
+        : {}),
     },
     { additionalProperties: false },
   );
@@ -67,7 +91,10 @@ export function createSubagentTool(config: AgentsConfig, executeBatch: SubagentE
     parameters,
     executionMode: "sequential",
     renderCall(args, theme) {
-      const requests = (args as { agents?: SubagentRequest[] }).agents ?? [];
+      const { agents: requests = [], background = false } = args as {
+        agents?: SubagentRequest[];
+        background?: boolean;
+      };
       const blocks = requests.map((request) => {
         const role = "role" in request ? request.role : roleForHandle(request.agent, config);
         const resumed = "agent" in request ? ` ${theme.fg("accent", "↻")}` : "";
@@ -75,12 +102,30 @@ export function createSubagentTool(config: AgentsConfig, executeBatch: SubagentE
       });
       if (requests.length === 1) {
         const [roleLine, ...promptLines] = blocks[0]!.split("\n");
-        return new Text(`${theme.fg("dim", "Subagent · ")}${roleLine}\n\n${promptLines.join("\n")}`, 0, 0);
+        const prefix = background ? "Subagent · background · " : "Subagent · ";
+        return new Text(`${theme.fg("dim", prefix)}${roleLine}\n\n${promptLines.join("\n")}`, 0, 0);
       }
-      return new Text(`${theme.fg("dim", `Subagents · ${requests.length}`)}\n\n${blocks.join("\n\n")}`, 0, 0);
+      const suffix = background ? " · background" : "";
+      return new Text(`${theme.fg("dim", `Subagents · ${requests.length}${suffix}`)}\n\n${blocks.join("\n\n")}`, 0, 0);
     },
     async execute(_toolCallId, params, signal) {
-      const result = await executeBatch((params as { agents: SubagentRequest[] }).agents, signal);
+      const { agents, background = false } = params as { agents: SubagentRequest[]; background?: boolean };
+      if (background) {
+        if (!options.startBackgroundBatch) throw new Error("Background subagents are available only in the root session.");
+        signal?.throwIfAborted();
+        const launch = options.startBackgroundBatch(agents);
+        const receipt: BackgroundBatchReceipt = {
+          background: true,
+          batchId: launch.batchId,
+          status: "started",
+          agentCount: agents.length,
+        };
+        return {
+          content: [{ type: "text", text: formatBackgroundReceipt(receipt) }],
+          details: receipt,
+        };
+      }
+      const result = await executeBatch(agents, signal);
       return {
         content: [{ type: "text", text: formatBatchForModel(result) }],
         details: result,
@@ -99,6 +144,11 @@ function roleForHandle(handle: string, config: AgentsConfig): string {
     if (normalized === slug || normalized.startsWith(`${slug}-`)) return role.name;
   }
   return "Agent";
+}
+
+export function formatBackgroundReceipt(receipt: BackgroundBatchReceipt): string {
+  const noun = receipt.agentCount === 1 ? "agent" : "agents";
+  return `[Background subagents · ${receipt.batchId} · started]\n${receipt.agentCount} ${noun} launched. Results will be delivered automatically after every agent settles; continue other work without polling.`;
 }
 
 export function formatBatchForModel(result: BatchResult): string {

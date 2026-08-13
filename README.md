@@ -108,6 +108,20 @@ subagent({
 
 Independent array items execute concurrently. `timeoutMinutes` may be omitted to use the role-specific or global default, set to any positive integer to override that default, or set to `-1` for no timeout. Configured timeout values are defaults, not maximum limits.
 
+Root sessions can detach a complete call while continuing other work:
+
+```ts
+subagent({
+  background: true,
+  agents: [
+    { role: "Atlas", task: "Map the existing API and return evidence." },
+    { role: "Vigil", task: "Review the approved design risks." },
+  ],
+});
+```
+
+The call returns a batch receipt immediately. After every requested agent has settled—including failures, timeouts, and cancellations—the extension delivers one aggregated follow-up to the main session and triggers a turn when idle. Nested child-agent tools do not expose `background`; their delegations remain synchronous, including when the root batch itself is running in the background.
+
 ## Session transfer and prompt commands
 
 Use `/handoff [optional next goal]` to transfer the recorded work into a fresh parent-linked session. The command runs a normal main-agent summary turn with the existing tools and subagent orchestration available, waits for it to settle, and opens the generated chronological handoff for review. Accepting the review creates the new session and places the edited handoff in its editor; it is never submitted automatically. With no argument, the handoff continues the current work from its present state. For unusually large, compacted, or incomplete histories, the agent may use read-only Atlas subagents to inspect the saved session history.

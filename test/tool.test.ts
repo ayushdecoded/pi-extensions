@@ -40,7 +40,21 @@ test("tool schema derives role names and descriptions without exposing runtime d
   assert.match(schema, /Focused exploration/);
   assert.match(schema, /Builder/);
   assert.match(schema, /Minutes; omit for default, -1 for no timeout/);
+  assert.doesNotMatch(schema, /background/i, "nested tools do not expose background execution");
   assert.doesNotMatch(`${tool.description}\n${schema}`, /maxDepth|remaining depth|depth available|smaller positive|maximum timeout|images/i);
+});
+
+test("only root tools expose background batches", () => {
+  const completion = Promise.resolve({ batchId: "batch", runs: [], allRuns: [], durationMs: 0 });
+  const root = createSubagentTool(
+    config,
+    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
+    { startBackgroundBatch: () => ({ batchId: "background", completion }) },
+  );
+  const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 }));
+
+  assert.match(JSON.stringify(root.parameters), /Root session only.*aggregate result.*settles/);
+  assert.doesNotMatch(JSON.stringify(nested.parameters), /background/i);
 });
 
 test("tool card shows each role and full prompt once without duplicate result metadata", () => {
@@ -74,6 +88,45 @@ test("tool execution keeps prompts out of model-facing results and emits no dupl
   assert.equal(receivedProgress, undefined);
   assert.deepEqual(updates, []);
   assert.doesNotMatch(JSON.stringify(result), /SECRET/);
+});
+
+test("background execution returns a receipt immediately without awaiting or invoking the synchronous path", async () => {
+  let resolveCompletion!: (value: any) => void;
+  const completion = new Promise<any>((resolve) => { resolveCompletion = resolve; });
+  let synchronousCalls = 0;
+  let backgroundRequests: unknown;
+  const tool = createSubagentTool(
+    config,
+    async () => {
+      synchronousCalls += 1;
+      return { batchId: "sync", runs: [], allRuns: [], durationMs: 0 };
+    },
+    {
+      startBackgroundBatch: (requests) => {
+        backgroundRequests = requests;
+        return { batchId: "detached", completion };
+      },
+    },
+  ) as any;
+
+  const result = await tool.execute(
+    "call",
+    { background: true, agents: [{ role: "Scout", task: "Research while the root continues" }] },
+    undefined,
+  );
+  assert.equal(synchronousCalls, 0);
+  assert.deepEqual(backgroundRequests, [{ role: "Scout", task: "Research while the root continues" }]);
+  assert.deepEqual(result.details, { background: true, batchId: "detached", status: "started", agentCount: 1 });
+  assert.match(result.content[0].text, /Results will be delivered automatically.*without polling/);
+  resolveCompletion({ batchId: "detached", runs: [], allRuns: [], durationMs: 0 });
+});
+
+test("nested tool execution rejects background requests even if schema validation is bypassed", async () => {
+  const tool = createSubagentTool(config, async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 })) as any;
+  await assert.rejects(
+    tool.execute("call", { background: true, agents: [{ role: "Scout", task: "no" }] }),
+    /only in the root session/,
+  );
 });
 
 test("tool guidance defines bounded empty-slate delegation", () => {

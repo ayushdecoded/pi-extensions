@@ -21,6 +21,7 @@ import type {
   ThinkingLevel,
 } from "./config/agents.ts";
 import { createActiveModeStore, resolveActiveMode } from "./config/mode.ts";
+import { deliverBackgroundBatchResult } from "./background.ts";
 import { createVisionHookHandler } from "./runtime/vision-hook.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
@@ -142,13 +143,29 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     }
   };
 
-  /** Register or replace the subagent tool with the active preset's role set. */
+  /** Register or replace the root subagent tool with the active preset's role set. */
   const registerSubagentTool = (config: AgentsConfig): void => {
     pi.registerTool(
-      createSubagentTool(config, (requests, signal, onProgress) => {
-        if (!runtime) throw new Error("Subagent runtime is not available for this session.");
-        return runtime.runRootBatch(requests, signal, onProgress);
-      }),
+      createSubagentTool(
+        config,
+        (requests, signal, onProgress) => {
+          if (!runtime) throw new Error("Subagent runtime is not available for this session.");
+          return runtime.runRootBatch(requests, signal, onProgress);
+        },
+        {
+          startBackgroundBatch: (requests) => {
+            const owner = runtime;
+            if (!owner) throw new Error("Subagent runtime is not available for this session.");
+            const launch = owner.startRootBatch(requests);
+            void deliverBackgroundBatchResult(
+              launch,
+              (message, options) => pi.sendMessage(message, options),
+              () => runtime === owner,
+            );
+            return launch;
+          },
+        },
+      ),
     );
   };
 

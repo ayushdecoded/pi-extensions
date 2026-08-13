@@ -134,6 +134,55 @@ test("root batches validate every request before recording state or allocating a
   assert.equal(runtime.state.invocations.size, 0);
 });
 
+test("root batches can return a launch handle before detached completion", async () => {
+  const events: any[] = [];
+  const runtime = validationRuntime(events);
+  let finish!: (result: any) => void;
+  const pending = new Promise<any>((resolve) => { finish = resolve; });
+  (runtime as any).runBatch = () => pending;
+
+  const launch = runtime.startRootBatch([{ role: "Atlas", task: "Inspect in the background." }]);
+  assert.equal(typeof launch.batchId, "string");
+  assert.deepEqual(events.map((event) => event.type), ["batch.started", "delegation.started"]);
+  let completed = false;
+  void launch.completion.then(() => { completed = true; });
+  await Promise.resolve();
+  assert.equal(completed, false);
+
+  finish({ batchId: launch.batchId, runs: [], allRuns: [], durationMs: 0 });
+  const result = await launch.completion;
+  assert.equal(result.batchId, launch.batchId);
+  assert.deepEqual(result.allRuns, []);
+});
+
+test("batches await every request and aggregate unexpected invocation rejections as failures", async () => {
+  const runtime = validationRuntime([]);
+  let finishSecond!: (result: any) => void;
+  const second = new Promise<any>((resolve) => { finishSecond = resolve; });
+  (runtime as any).runInvocation = (_request: unknown, _context: unknown, requestIndex: number) =>
+    requestIndex === 0 ? Promise.reject(new Error("failed before session creation")) : second;
+
+  const launch = runtime.startRootBatch([
+    { role: "Atlas", task: "First" },
+    { role: "Atlas", task: "Second" },
+  ]);
+  let completed = false;
+  void launch.completion.then(() => { completed = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(completed, false, "one rejection must not report before the remaining request settles");
+
+  finishSecond({
+    invocationId: "second", agent: "atlas-2", role: "Atlas", status: "complete",
+    durationMs: 1, output: "done", usage: { ...ZERO_USAGE },
+  });
+  const result = await launch.completion;
+  assert.equal(result.runs.length, 2);
+  assert.equal(result.runs[0]!.status, "failed");
+  assert.match(result.runs[0]!.error ?? "", /failed before session creation/);
+  assert.equal(result.runs[1]!.status, "complete");
+  assert.deepEqual(result.allRuns, result.runs);
+});
+
 test("nested batches validate before suspending the parent lease", async () => {
   const runtime = validationRuntime([]);
   let suspensions = 0;

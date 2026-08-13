@@ -22,6 +22,7 @@ import { ActiveWorkTimeout } from "./timeout.ts";
 import {
   ZERO_USAGE,
   type AgentRecord,
+  type BackgroundBatchLaunch,
   type BatchResult,
   type InvocationContext,
   type InvocationRecord,
@@ -150,7 +151,11 @@ export class SubagentRuntime {
     return this.transcriptRevisions.get(handle) ?? 0;
   }
 
-  async runRootBatch(requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void): Promise<BatchResult> {
+  startRootBatch(
+    requests: SubagentRequest[],
+    signal?: AbortSignal,
+    onProgress?: (result: BatchResult) => void,
+  ): BackgroundBatchLaunch {
     this.validateBatch(requests);
     const batchId = randomUUID();
     const createdAt = Date.now();
@@ -159,12 +164,22 @@ export class SubagentRuntime {
     this.record({ type: "delegation.started", call: { id: callId, batchId, createdAt } });
     const progress = () => onProgress?.(this.snapshotBatch(batchId, undefined, createdAt));
     const unsubscribe = onProgress ? this.subscribe(progress) : undefined;
-    try {
-      const result = await this.runBatch(requests, { batchId, callId, depth: 0 }, signal);
-      return { ...result, allRuns: this.resultsForBatch(batchId), durationMs: Date.now() - createdAt };
-    } finally {
-      unsubscribe?.();
-    }
+    const completion = this.runBatch(requests, { batchId, callId, depth: 0 }, signal)
+      .then((result) => {
+        const persisted = this.resultsForBatch(batchId);
+        const persistedIds = new Set(persisted.map((run) => run.invocationId));
+        return {
+          ...result,
+          allRuns: [...persisted, ...result.runs.filter((run) => !persistedIds.has(run.invocationId))],
+          durationMs: Date.now() - createdAt,
+        };
+      })
+      .finally(() => unsubscribe?.());
+    return { batchId, completion };
+  }
+
+  async runRootBatch(requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void): Promise<BatchResult> {
+    return this.startRootBatch(requests, signal, onProgress).completion;
   }
 
   async runNestedBatch(
@@ -206,8 +221,38 @@ export class SubagentRuntime {
     const startedAt = Date.now();
     const pending = requests.map((request, requestIndex) => this.trackInvocation(request, context, requestIndex, signal));
     this.startHeadingGeneration(requests, context);
-    const runs = await Promise.all(pending);
+    const settled = await Promise.allSettled(pending);
+    const runs = settled.map((result, requestIndex) =>
+      result.status === "fulfilled"
+        ? result.value
+        : this.failedInvocationResult(requests[requestIndex]!, context, requestIndex, startedAt, result.reason)
+    );
     return { batchId: context.batchId, runs, allRuns: runs, durationMs: Date.now() - startedAt };
+  }
+
+  private failedInvocationResult(
+    request: SubagentRequest,
+    context: InvocationContext,
+    requestIndex: number,
+    startedAt: number,
+    error: unknown,
+  ): InvocationResult {
+    const invocation = [...this.state.invocations.values()].find((candidate) =>
+      candidate.callId === context.callId && candidate.requestIndex === requestIndex
+    );
+    const role = invocation?.role ?? ("role" in request
+      ? this.effectiveRoles.find((candidate) => candidate.name.toLowerCase() === request.role.toLowerCase())?.name ?? request.role
+      : this.state.agents.get(request.agent)?.role ?? "Agent");
+    const slug = role.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "agent";
+    return {
+      invocationId: invocation?.id ?? `unstarted-${context.callId ?? context.batchId}-${requestIndex}`,
+      agent: invocation?.agent ?? ("agent" in request ? request.agent : `${slug}-unstarted`),
+      role,
+      status: "failed",
+      durationMs: Date.now() - startedAt,
+      error: errorMessage(error),
+      usage: { ...ZERO_USAGE },
+    };
   }
 
   private trackInvocation(

@@ -112,6 +112,20 @@ export type BatchResult = {
   durationMs: number;
 };
 
+export type BackgroundBatchLaunch = {
+  batchId: string;
+  completion: Promise<BatchResult>;
+};
+
+export type BackgroundBatchReceipt = {
+  background: true;
+  batchId: string;
+  status: "started";
+  agentCount: number;
+};
+
+export type SubagentToolResult = BatchResult | BackgroundBatchReceipt;
+
 export type InvocationContext = {
   batchId: string;
   callId?: string;
