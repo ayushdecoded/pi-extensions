@@ -14,6 +14,8 @@ Run against Pi 0.80.7 with extension discovery disabled and only `src/index.ts` 
 
 Reload survival was additionally verified at the event layer: the batch that crossed `/reload` recorded `invocation.finished … complete`, while a batch interrupted by `/tree` branch navigation recorded `invocation.finished … cancelled (Cancelled by the parent session.)`.
 
+Background terminal runs: `runs-running-before.*` shows a detached bash run (`sleep 25`, `⏳1` border) right before `/reload`; `runs-ps-after.*` shows `/ps` after reload reporting `complete · 25s · exit 0` instead of getting stuck at `detached`; `runs-settled-after.*` shows the `⟳ Background run · settled` card delivered to the reloaded session.
+
 `current-ui.termctrl` and `new-check.termctrl` — exact Terminal Control recordings.
 
 All Terminal Control sessions were stopped after capture.

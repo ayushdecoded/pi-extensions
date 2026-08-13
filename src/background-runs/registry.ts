@@ -25,11 +25,16 @@ export class BackgroundRunRegistry {
   private readonly outputs = new Map<string, RunOutput>();
   private readonly listeners = new Set<() => void>();
   private readonly settledListeners = new Set<(result: BackgroundRunSettledResult) => void>();
-  private readonly appendEvent: (event: BackgroundRunEvent) => void;
+  private appendEvent: (event: BackgroundRunEvent) => void;
   private quitting = false;
 
   constructor(options: BackgroundRunRegistryOptions) {
     this.appendEvent = options.appendEvent;
+  }
+
+  /** Re-point persistence after a session reload adopts this registry. */
+  rebindAppendEvent(appendEvent: (event: BackgroundRunEvent) => void): void {
+    this.appendEvent = appendEvent;
   }
 
   isEmpty(): boolean {

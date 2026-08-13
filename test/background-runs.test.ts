@@ -46,6 +46,22 @@ async function waitFor(condition: () => boolean, timeoutMs = 2000): Promise<void
   }
 }
 
+test("rebindAppendEvent re-points persistence after a reload adopts the registry", async () => {
+  const first: unknown[] = [];
+  const second: unknown[] = [];
+  const registry = new BackgroundRunRegistry({ appendEvent: (event) => first.push(event) });
+  const settled = settle(registry);
+
+  const record = registry.launch("printf reload-survived", process.cwd());
+  // Simulate the reloaded extension instance taking over persistence.
+  registry.rebindAppendEvent((event) => second.push(event));
+
+  await settled;
+  const settledEvent = second.find((event) => (event as { type?: string }).type === "run.settled");
+  assert.ok(settledEvent, "run.settled is persisted through the rebound hook");
+  assert.equal(registry.get(record.id)?.status, "complete");
+});
+
 test("launched runs settle as complete with bounded output tail and persisted events", async () => {
   const events: unknown[] = [];
   const registry = new BackgroundRunRegistry({ appendEvent: (event) => events.push(event) });

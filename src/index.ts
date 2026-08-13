@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
 import {
   AGENTS_CONFIG_FILE_NAME,
   THINKING_LEVELS,
@@ -98,6 +98,10 @@ type ReloadState = {
     message: Parameters<ExtensionAPI["sendMessage"]>[0];
     options?: Parameters<ExtensionAPI["sendMessage"]>[1];
   }>;
+  /** Per-session background-run registries, so detached processes stay tracked across reload. */
+  backgroundRunRegistries: Map<string, BackgroundRunRegistry>;
+  /** The live extension sendMessage per root session id, resolved at run settle time. */
+  backgroundRunSenders: Map<string, ExtensionAPI["sendMessage"]>;
 };
 
 function reloadState(): ReloadState {
@@ -110,6 +114,8 @@ function reloadState(): ReloadState {
       sessionRuntimes: new Map(),
       sessionSenders: new Map(),
       bufferedFollowUps: [],
+      backgroundRunRegistries: new Map(),
+      backgroundRunSenders: new Map(),
     };
     global[RELOAD_STATE_KEY] = state;
   }
@@ -142,7 +148,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   const reload = reloadState();
   // Closure-local aliases of the process-global handoff registries: each
   // reloaded module instance sees the same Map/array objects.
-  const { detachedRuntimes, detachedEventBuffer, sessionRuntimes, sessionSenders, bufferedFollowUps } = reload;
+  const { detachedRuntimes, detachedEventBuffer, sessionRuntimes, sessionSenders, bufferedFollowUps, backgroundRunRegistries, backgroundRunSenders } = reload;
   let runtime: SubagentRuntime | undefined;
   let currentConfig: AgentsConfig | undefined;
   let registered = false;
@@ -162,15 +168,34 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerPackSystemPrompt(pi);
 
   // Background terminal runs: detached processes launched through the bash tool,
-  // tracked here, killed on quit (left running on reload), listed via /ps.
+  // tracked per session, killed on quit (left running on reload), listed via /ps.
   let composerTui: TUI | undefined;
-  const backgroundRuns = new BackgroundRunRegistry({
-    appendEvent: (event) => pi.appendEntry(BACKGROUND_RUNS_ENTRY_TYPE, event),
-  });
-  backgroundRuns.onSettled((result) => {
-    deliverBackgroundRunResult(result, pi.sendMessage);
-  });
-  backgroundRuns.subscribe(() => composerTui?.requestRender());
+  let backgroundRuns: BackgroundRunRegistry | undefined;
+
+  /**
+   * The registry for this session. A reload re-imports this module, so the
+   * registry lives in the global reload state: the reloaded instance adopts the
+   * existing one (with its live process handlers) and re-points persistence at
+   * its own session API. The settle listener is registered once, at creation,
+   * and resolves the session's live sender at settle time.
+   */
+  const getBackgroundRuns = (sessionId: string, entries: readonly SessionEntry[]): BackgroundRunRegistry => {
+    let registry = backgroundRunRegistries.get(sessionId);
+    if (!registry) {
+      registry = new BackgroundRunRegistry({
+        appendEvent: (event) => pi.appendEntry(BACKGROUND_RUNS_ENTRY_TYPE, event),
+      });
+      registry.seed(reconcileBackgroundRuns(entries));
+      registry.onSettled((result) => {
+        deliverBackgroundRunResult(result, (message, options) => backgroundRunSenders.get(sessionId)?.(message, options));
+      });
+      backgroundRunRegistries.set(sessionId, registry);
+    } else {
+      registry.rebindAppendEvent((event) => pi.appendEntry(BACKGROUND_RUNS_ENTRY_TYPE, event));
+    }
+    registry.subscribe(() => composerTui?.requestRender());
+    return registry;
+  };
   pi.registerMessageRenderer(BACKGROUND_RUN_RESULT_TYPE, renderBackgroundRunMessage);
 
   pi.registerMessageRenderer(BACKGROUND_SUBAGENT_RESULT_TYPE, renderBackgroundBatchMessage);
@@ -196,9 +221,21 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
   const activate = async (ctx: ExtensionContext, config: AgentsConfig, activeMode?: string): Promise<void> => {
     const sessionId = ctx.sessionManager.getSessionId();
-    // Background batches may settle after this session_start; route their
-    // follow-up through the live extension API for this session.
+    // Background batches and runs may settle after this session_start; route
+    // their follow-ups through the live extension API for this session.
     sessionSenders.set(sessionId, (message, options) => pi.sendMessage(message, options));
+    backgroundRunSenders.set(sessionId, (message, options) => pi.sendMessage(message, options));
+    // Deliver follow-ups that settled during the reload gap through this API.
+    for (let index = bufferedFollowUps.length - 1; index >= 0; index -= 1) {
+      const followUp = bufferedFollowUps[index]!;
+      if (followUp.sessionId !== sessionId) continue;
+      bufferedFollowUps.splice(index, 1);
+      try {
+        pi.sendMessage(followUp.message, followUp.options);
+      } catch {
+        // Best-effort; the settled state stays visible in /ps or /agents.
+      }
+    }
 
     const previous = runtime;
     runtime = undefined;
@@ -232,17 +269,6 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       // Reload resets the provider registry; rebuild the shared model runtime
       // so new child sessions resolve the freshly registered providers.
       adopted.resetModelRuntime();
-      // Deliver follow-ups that settled during the reload gap through this API.
-      for (let index = bufferedFollowUps.length - 1; index >= 0; index -= 1) {
-        const followUp = bufferedFollowUps[index]!;
-        if (followUp.sessionId !== sessionId) continue;
-        bufferedFollowUps.splice(index, 1);
-        try {
-          pi.sendMessage(followUp.message, followUp.options);
-        } catch {
-          // Best-effort; the settled state stays visible in /agents.
-        }
-      }
       for (const event of buffered) {
         try {
           pi.appendEntry(SUBAGENT_ENTRY_TYPE, event);
@@ -319,6 +345,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
   /** Replace the built-in bash tool with the background-capable wrapper for this session's cwd. */
   const registerBackgroundBashTool = (cwd: string): void => {
+    if (!backgroundRuns) return;
     pi.registerTool(createBackgroundBashTool({ cwd, registry: backgroundRuns }));
   };
 
@@ -360,9 +387,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     }
 
     currentConfig = config;
-    if (backgroundRuns.isEmpty()) {
-      backgroundRuns.seed(reconcileBackgroundRuns(ctx.sessionManager.getEntries()));
-    }
+    backgroundRuns = getBackgroundRuns(ctx.sessionManager.getSessionId(), ctx.sessionManager.getEntries());
     const activeMode = resolveActiveMode(config, activeModeStore.load(config.path));
 
     if (ctx.mode === "tui") {
@@ -471,12 +496,16 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   pi.registerCommand("ps", {
     description: "Inspect background terminal runs (x kills the selected run)",
     handler: async (_args, ctx) => {
+      if (!backgroundRuns) {
+        ctx.ui.notify("Background runs are not available for this session.", "warning");
+        return;
+      }
       if (ctx.mode !== "tui") {
         ctx.ui.notify("The background runs panel requires TUI mode.", "warning");
         return;
       }
       await ctx.ui.custom<void>(
-        (tui, theme, keybindings, done) => new ProcessesPanel(backgroundRuns, tui, theme, keybindings, done),
+        (tui, theme, keybindings, done) => new ProcessesPanel(backgroundRuns!, tui, theme, keybindings, done),
         {
           overlay: true,
           overlayOptions: { anchor: "top-left", width: "100%", maxHeight: "100%" },
@@ -552,7 +581,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     if (event.reason === "quit") {
       accounts.dispose();
       stopAccounts();
-      backgroundRuns.shutdown();
+      backgroundRuns?.shutdown();
     }
     footer.dispose();
     const active = runtime;
@@ -565,9 +594,12 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       const buffer: SubagentEvent[] = [];
       detachedEventBuffer.set(sessionId, buffer);
       active.rebindForReload({ appendEvent: (event: SubagentEvent) => buffer.push(event) });
-      // A batch settling during the reload gap must still report: hold its
-      // follow-up until the adopting instance drains it in activate().
+      // A batch or run settling during the reload gap must still report: hold
+      // its follow-up until the adopting instance drains it in activate().
       sessionSenders.set(sessionId, (message, options) => {
+        bufferedFollowUps.push({ sessionId, message, options });
+      });
+      backgroundRunSenders.set(sessionId, (message, options) => {
         bufferedFollowUps.push({ sessionId, message, options });
       });
       detachedRuntimes.set(sessionId, active);
@@ -576,6 +608,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     const sessionId = ctx.sessionManager.getSessionId();
     sessionRuntimes.delete(sessionId);
     sessionSenders.delete(sessionId);
+    backgroundRunSenders.delete(sessionId);
     for (let index = bufferedFollowUps.length - 1; index >= 0; index -= 1) {
       if (bufferedFollowUps[index]!.sessionId === sessionId) bufferedFollowUps.splice(index, 1);
     }
@@ -590,7 +623,8 @@ function notifyError(ctx: ExtensionContext, error: unknown): void {
 }
 
 /** Composer border label for active background runs; empty when none are running. */
-function backgroundRunsLabel(registry: BackgroundRunRegistry, theme: Theme): string {
+function backgroundRunsLabel(registry: BackgroundRunRegistry | undefined, theme: Theme): string {
+  if (!registry) return "";
   const count = registry.activeCount();
   return count > 0 ? theme.fg("warning", ` ⏳${count}`) : "";
 }
