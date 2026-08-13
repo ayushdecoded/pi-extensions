@@ -42,6 +42,7 @@ import { AgentsDashboard } from "./ui/dashboard.ts";
 import {
   showAgentModelConfigure,
   type AgentModelChoice,
+  type AgentRoleConfigureChange,
 } from "./ui/agents-configure.ts";
 import { createFooterController, contextLabelFor } from "./ui/footer.ts";
 import { installHeader } from "./ui/header.ts";
@@ -134,7 +135,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         cwd: ctx.cwd,
         config,
         activeMode,
-        roleModelOverride: (preset, role) => modelOverrideStore.get(config.path, preset, role),
+        roleOverride: (preset, role) => modelOverrideStore.get(config.path, preset, role),
         modelRegistry: ctx.modelRegistry,
         reservedHandles: new Set(allState.agents.keys()),
         appendEvent: (event: SubagentEvent) => pi.appendEntry(SUBAGENT_ENTRY_TYPE, event),
@@ -268,26 +269,39 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           return;
         }
         const configured = resolvePreset(active.options.config, active.activeMode).roles;
-        const result = await showAgentModelConfigure(ctx, {
-          roles: active.activeRoles.map((role) => ({
-            name: role.name,
-            model: role.model,
-            configuredModel: configured.find((candidate) => candidate.name === role.name)?.model ?? role.model,
-            thinking: role.thinking,
-          })),
-          scopedModels: projectAgentModels(ctx.scopedModels.map((item) => item.model), ctx),
-          allModels: projectAgentModels(ctx.modelRegistry.getAvailable(), ctx),
-        });
-        if (!result) return;
-        const role = configured.find((candidate) => candidate.name === result.role);
-        if (!role) {
-          ctx.ui.notify(`Unknown active agent role: ${result.role}.`, "error");
-          return;
-        }
-        const model = "reset" in result ? undefined : result.model;
-        modelOverrideStore.set(active.options.config.path, active.activeMode, role.name, model);
-        active.refreshRoleModels();
-        ctx.ui.notify(`${role.name} model: ${model ?? role.model}`, "info");
+        const mode = active.activeMode;
+        const configPath = active.options.config.path;
+        const applyChange = (roleName: string, change: AgentRoleConfigureChange): void => {
+          const role = configured.find((candidate) => candidate.name === roleName);
+          if (!role) return;
+          switch (change.kind) {
+            case "model": modelOverrideStore.set(configPath, mode, role.name, { model: change.model }); break;
+            case "thinking": modelOverrideStore.set(configPath, mode, role.name, { thinking: change.thinking }); break;
+            case "reset-model": modelOverrideStore.set(configPath, mode, role.name, { model: undefined }); break;
+            case "reset-thinking": modelOverrideStore.set(configPath, mode, role.name, { thinking: undefined }); break;
+          }
+          active.refreshRoles();
+          ctx.ui.notify(`${role.name} ${describeConfigureChange(change)}`, "info");
+        };
+        await showAgentModelConfigure(
+          ctx,
+          {
+            mode,
+            roles: active.activeRoles.map((role) => {
+              const base = configured.find((candidate) => candidate.name === role.name);
+              return {
+                name: role.name,
+                model: role.model,
+                thinking: role.thinking,
+                configuredModel: base?.model ?? role.model,
+                configuredThinking: base?.thinking ?? role.thinking,
+              };
+            }),
+            scopedModels: projectAgentModels(ctx.scopedModels.map((item) => item.model), ctx),
+            allModels: projectAgentModels(ctx.modelRegistry.getAvailable(), ctx),
+          },
+          applyChange,
+        );
         return;
       }
       if (command) {
@@ -387,6 +401,15 @@ function notifyError(ctx: ExtensionContext, error: unknown): void {
   if (!ctx.hasUI) return;
   const message = error instanceof Error ? error.message : String(error);
   ctx.ui.notify(`Subagent extension unavailable: ${message}`, "error");
+}
+
+function describeConfigureChange(change: AgentRoleConfigureChange): string {
+  switch (change.kind) {
+    case "model": return `model: ${change.model}`;
+    case "thinking": return `thinking: ${change.thinking}`;
+    case "reset-model": return "model reset to configured";
+    case "reset-thinking": return "thinking reset to configured";
+  }
 }
 
 function codexWeeklyRemaining(accounts: AccountController): number | undefined {

@@ -53,8 +53,49 @@ test("only root tools expose background batches", () => {
   );
   const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 }));
 
-  assert.match(JSON.stringify(root.parameters), /Root session only.*aggregate result.*settles/);
+  assert.match(JSON.stringify(root.parameters), /Defaults to true.*aggregate result.*settles/);
   assert.doesNotMatch(JSON.stringify(nested.parameters), /background/i);
+});
+
+test("root delegations default to background and background: false waits inline", async () => {
+  let resolveCompletion!: (value: any) => void;
+  const completion = new Promise<any>((resolve) => { resolveCompletion = resolve; });
+  let synchronousCalls = 0;
+  const tool = createSubagentTool(
+    config,
+    async () => {
+      synchronousCalls += 1;
+      return { batchId: "sync", runs: [], allRuns: [], durationMs: 0 };
+    },
+    { startBackgroundBatch: () => ({ batchId: "detached", completion }) },
+  ) as any;
+
+  const receipt = await tool.execute("call", { agents: [{ role: "Scout", task: "T1" }] }, undefined);
+  assert.deepEqual(receipt.details, { background: true, batchId: "detached", status: "started", agentCount: 1 });
+  assert.equal(synchronousCalls, 0, "omitting background detaches instead of blocking");
+
+  const synced = await tool.execute("call", { background: false, agents: [{ role: "Scout", task: "T2" }] }, undefined);
+  assert.equal(synchronousCalls, 1);
+  assert.equal(synced.details.batchId, "sync");
+  resolveCompletion({ batchId: "detached", runs: [], allRuns: [], durationMs: 0 });
+});
+
+test("root tool cards mark background by default while nested cards stay unmarked", () => {
+  const completion = Promise.resolve({ batchId: "b", runs: [], allRuns: [], durationMs: 0 });
+  const root = createSubagentTool(
+    config,
+    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
+    { startBackgroundBatch: () => ({ batchId: "bg", completion }) },
+  ) as any;
+  const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 })) as any;
+  const theme = { fg: (_color: string, text: string) => text } as any;
+
+  const rootDefault = root.renderCall({ agents: [{ role: "Scout", task: "T" }] }, theme).render(120).join("\n");
+  assert.match(rootDefault, /background/);
+  const rootBlocking = root.renderCall({ background: false, agents: [{ role: "Scout", task: "T" }] }, theme).render(120).join("\n");
+  assert.doesNotMatch(rootBlocking, /background/);
+  const nestedCall = nested.renderCall({ agents: [{ role: "Scout", task: "T" }] }, theme).render(120).join("\n");
+  assert.doesNotMatch(nestedCall, /background/);
 });
 
 test("tool card shows each role and full prompt once without duplicate result metadata", () => {

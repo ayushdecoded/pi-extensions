@@ -5,6 +5,7 @@ import { CapacityScheduler } from "../src/runtime/scheduler.ts";
 import { advanceStateRevision, applyEvent, emptyRuntimeState, usageDelta } from "../src/runtime/state.ts";
 import { ZERO_USAGE, type InvocationRecord } from "../src/runtime/types.ts";
 import type { AgentsConfig } from "../src/config/agents.ts";
+import type { RoleOverride } from "../src/config/model-overrides.ts";
 import {
   SubagentRuntime,
   toolsForRole,
@@ -102,8 +103,10 @@ test("switching the active preset re-resolves roles and notifies subscribers", (
   assert.throws(() => runtime.setActiveMode("missing"), /Unknown agents preset: missing\./);
 });
 
-test("persisted role model overrides are preset-scoped and refresh immediately", () => {
-  const selected = new Map<string, string>([["deep:Atlas", "provider/deep-override"]]);
+test("persisted role overrides apply model and thinking and refresh immediately", () => {
+  const selected = new Map<string, RoleOverride>([
+    ["deep:Atlas", { model: "provider/deep-override", thinking: "max" }],
+  ]);
   const runtime = new SubagentRuntime({
     rootSessionId: "override-root",
     cwd: "/tmp",
@@ -122,7 +125,7 @@ test("persisted role model overrides are preset-scoped and refresh immediately",
       ],
     },
     activeMode: "deep",
-    roleModelOverride: (preset, role) => selected.get(`${preset}:${role}`),
+    roleOverride: (preset, role) => selected.get(`${preset}:${role}`),
     modelRegistry: {} as any,
     appendEvent: () => {},
   });
@@ -130,11 +133,14 @@ test("persisted role model overrides are preset-scoped and refresh immediately",
   runtime.subscribe(() => { updates += 1; });
 
   assert.equal(runtime.activeRoles[0]!.model, "provider/deep-override");
+  assert.equal(runtime.activeRoles[0]!.thinking, "max");
   runtime.setActiveMode("light");
   assert.equal(runtime.activeRoles[0]!.model, "provider/light");
-  selected.set("light:Atlas", "provider/light-override");
-  runtime.refreshRoleModels();
+  assert.equal(runtime.activeRoles[0]!.thinking, "medium", "thinking stays on the preset-applied value");
+  selected.set("light:Atlas", { model: "provider/light-override" });
+  runtime.refreshRoles();
   assert.equal(runtime.activeRoles[0]!.model, "provider/light-override");
+  assert.equal(runtime.activeRoles[0]!.thinking, "medium");
   assert.equal(updates, 2);
 });
 

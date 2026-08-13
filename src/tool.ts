@@ -11,8 +11,16 @@ import type {
 } from "./runtime/types.ts";
 import { roleText } from "./ui/roles.ts";
 
-const TOOL_DESCRIPTION =
+const BASE_TOOL_DESCRIPTION =
   "Delegate only bounded, verifiable work when specialization, independent judgment, or independent parallelism justifies coordination. Keep routine execution, inspection, directly verifiable validation, small tasks, and repeated discovery in the main session; do not delegate merely for confirmation or extra confidence. Fresh agents have no context. Include the objective, evidence, paths and symbols, completed work, decisions and rationale, constraints, boundaries, expected result, and stop condition. For parallel calls, share baseline context and assign distinct responsibilities; duplicate only for intentional verification. Resume useful contexts and integrate results yourself.";
+
+/** Root delegations detach by default: continue working, results arrive as one follow-up. */
+const ROOT_DELIVERY_GUIDANCE =
+  " Prefer background delegation: the call returns a receipt immediately and one aggregated follow-up arrives after every agent settles, so continue other work without polling. Pass background: false only when this turn must block on the results before doing anything else.";
+
+/** Child delegations stay synchronous; the root session owns the background capability. */
+const NESTED_DELIVERY_GUIDANCE =
+  " Delegation is synchronous: the call waits and returns results inline when the batch settles. Background delegation is available only to the root session.";
 
 export type SubagentExecutor = (requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void) => Promise<BatchResult>;
 export type BackgroundSubagentExecutor = (requests: SubagentRequest[]) => BackgroundBatchLaunch;
@@ -76,7 +84,7 @@ export function createSubagentTool(
         ? {
             background: Type.Optional(Type.Boolean({
               description:
-                "Root session only. Launch this batch and return immediately; one aggregate result is delivered after every run settles.",
+                "Defaults to true. Launch this batch and return immediately; one aggregate result is delivered after every run settles. Pass false to wait for results inline before continuing.",
             })),
           }
         : {}),
@@ -84,17 +92,16 @@ export function createSubagentTool(
     { additionalProperties: false },
   );
 
+  const backgroundCapable = options.startBackgroundBatch !== undefined;
   return {
     name: "subagent",
     label: "Subagents",
-    description: TOOL_DESCRIPTION,
+    description: BASE_TOOL_DESCRIPTION + (backgroundCapable ? ROOT_DELIVERY_GUIDANCE : NESTED_DELIVERY_GUIDANCE),
     parameters,
     executionMode: "sequential",
     renderCall(args, theme) {
-      const { agents: requests = [], background = false } = args as {
-        agents?: SubagentRequest[];
-        background?: boolean;
-      };
+      const { agents: requests = [] } = args as { agents?: SubagentRequest[] };
+      const background = (args as { background?: boolean }).background ?? backgroundCapable;
       const blocks = requests.map((request) => {
         const role = "role" in request ? request.role : roleForHandle(request.agent, config);
         const resumed = "agent" in request ? ` ${theme.fg("accent", "↻")}` : "";
@@ -109,7 +116,8 @@ export function createSubagentTool(
       return new Text(`${theme.fg("dim", `Subagents · ${requests.length}${suffix}`)}\n\n${blocks.join("\n\n")}`, 0, 0);
     },
     async execute(_toolCallId, params, signal) {
-      const { agents, background = false } = params as { agents: SubagentRequest[]; background?: boolean };
+      const { agents } = params as { agents: SubagentRequest[] };
+      const background = (params as { background?: boolean }).background ?? backgroundCapable;
       if (background) {
         if (!options.startBackgroundBatch) throw new Error("Background subagents are available only in the root session.");
         signal?.throwIfAborted();

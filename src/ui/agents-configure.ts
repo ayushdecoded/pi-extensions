@@ -1,12 +1,14 @@
 import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { THINKING_LEVELS, type ThinkingLevel } from "../config/agents.ts";
 
 export type AgentModelRoleChoice = {
   name: string;
   model: string;
-  configuredModel: string;
   thinking: string;
+  configuredModel: string;
+  configuredThinking: string;
 };
 
 export type AgentModelChoice = {
@@ -16,21 +18,36 @@ export type AgentModelChoice = {
   name: string;
 };
 
-export type AgentModelConfigureResult =
-  | { role: string; model: string }
-  | { role: string; reset: true }
-  | undefined;
+/** One confirmed edit. Callers persist it immediately. */
+export type AgentRoleConfigureChange =
+  | { kind: "model"; model: string }
+  | { kind: "thinking"; thinking: ThinkingLevel }
+  | { kind: "reset-model" }
+  | { kind: "reset-thinking" };
 
 export type AgentModelConfigureInput = {
+  /** Active preset name. Shown in the header; persistence is scoped to it. */
+  mode?: string;
   roles: AgentModelRoleChoice[];
   scopedModels: AgentModelChoice[];
   allModels: AgentModelChoice[];
 };
 
-type Stage = "roles" | "providers" | "models";
+type Stage = "roles" | "settings" | "providers" | "models" | "thinking";
+type Item =
+  | { kind: "role"; role: AgentModelRoleChoice }
+  | { kind: "setting"; setting: "model" | "thinking" | "reset-model" | "reset-thinking" | "done" }
+  | { kind: "provider"; provider: string; label: string }
+  | { kind: "model"; choice: AgentModelChoice }
+  | { kind: "thinking"; level: ThinkingLevel };
+
 const PANEL_WIDTH = 84;
 
-/** Role → provider → model picker. Tab toggles Pi's scoped models and all available models. */
+/**
+ * Role → settings → provider/model and thinking picker. Tab toggles Pi's
+ * scoped models and all available models. Each confirmed edit is handed to the
+ * onChange callback immediately, so the panel stays open for more changes.
+ */
 export class AgentModelConfigurePanel implements Component {
   private stage: Stage = "roles";
   private index = 0;
@@ -38,14 +55,18 @@ export class AgentModelConfigurePanel implements Component {
   private provider?: string;
   private all = false;
   private search = "";
+  private readonly effective = new Map<string, { model: string; thinking: string }>();
 
   constructor(
     private readonly input: AgentModelConfigureInput,
     private readonly tui: TUI,
     private readonly theme: Theme,
     private readonly keybindings: KeybindingsManager,
-    private readonly done: (result: AgentModelConfigureResult) => void,
-  ) {}
+    private readonly onChange: (role: string, change: AgentRoleConfigureChange) => void,
+    private readonly done: () => void,
+  ) {
+    for (const role of input.roles) this.effective.set(role.name, { model: role.model, thinking: role.thinking });
+  }
 
   handleInput(data: string): void {
     if (isKeyRelease(data)) return;
@@ -60,11 +81,13 @@ export class AgentModelConfigurePanel implements Component {
         this.stage = "providers";
         this.provider = undefined;
         this.search = "";
-      } else if (this.stage === "providers") {
+      } else if (this.stage === "providers" || this.stage === "thinking") {
+        this.stage = "settings";
+      } else if (this.stage === "settings") {
         this.stage = "roles";
         this.role = undefined;
       } else {
-        this.done(undefined);
+        this.done();
         return;
       }
       this.index = 0;
@@ -100,27 +123,48 @@ export class AgentModelConfigurePanel implements Component {
   render(width: number): string[] {
     const panelWidth = Math.max(1, Math.min(PANEL_WIDTH, width));
     const inner = Math.max(1, panelWidth - 2);
+    const pad = inner >= 10 ? 2 : 0;
+    const contentWidth = Math.max(1, inner - pad * 2);
     const items = this.items();
-    const bodyHeight = Math.max(4, Math.min(10, this.tui.terminal.rows - 7));
+    // Four fixed padding lines surround the header, frame, and hint; keep the
+    // body bounded so the padded panel still fits short terminals.
+    const bodyHeight = Math.max(4, Math.min(10, this.tui.terminal.rows - 11));
     const start = windowStart(this.index, items.length, bodyHeight);
     const scope = this.scopeIsEffective() ? (this.all ? "all" : "scoped") : "all";
-    const title = this.stage === "roles" ? "roles" : this.stage === "providers" ? `providers · ${this.role?.name ?? "role"}` : `models · ${this.providerLabel()}`;
-    const lines = [joinSides(this.theme.fg("accent", "Configure subagents"), this.theme.fg("dim", `${scope} models`), panelWidth)];
-    lines.push(frameTop(title, inner, this.theme));
+    const modePart = this.input.mode ? `mode: ${this.input.mode}` : undefined;
+    const headerRight = [modePart, `${scope} models`].filter(Boolean).join(" · ");
+    const lines = [""];
+    lines.push(joinSides(this.theme.fg("accent", "Configure subagents"), this.theme.fg("dim", headerRight), panelWidth));
+    lines.push("");
+    lines.push(frameTop(this.title(), inner, this.theme));
     for (let itemIndex = start; itemIndex < Math.min(items.length, start + bodyHeight); itemIndex += 1) {
-      lines.push(`${this.theme.fg("border", "│")}${padLine(this.renderItem(items[itemIndex]!, itemIndex === this.index, inner), inner)}${this.theme.fg("border", "│")}`);
+      const row = `${this.theme.fg("border", "│")}${" ".repeat(pad)}${padLine(this.renderItem(items[itemIndex]!, itemIndex === this.index, contentWidth), contentWidth)}${" ".repeat(pad)}${this.theme.fg("border", "│")}`;
+      lines.push(row);
     }
-    while (lines.length < bodyHeight + 2) lines.push(`${this.theme.fg("border", "│")}${" ".repeat(inner)}${this.theme.fg("border", "│")}`);
+    while (lines.length < bodyHeight + 4) {
+      lines.push(`${this.theme.fg("border", "│")}${" ".repeat(inner)}${this.theme.fg("border", "│")}`);
+    }
     lines.push(`${this.theme.fg("border", "╰")}${this.theme.fg("border", "─").repeat(inner)}${this.theme.fg("border", "╯")}`);
-    const search = this.stage === "models" && this.search ? ` · filter: ${this.search}` : "";
-    lines.push(`  ${this.theme.fg("dim", `↑↓ select · ↵ confirm · Tab ${this.all ? "scoped" : "all"} · esc ${this.stage === "roles" ? "cancel" : "back"}${search}`)}`);
+    lines.push("");
+    lines.push(`  ${this.theme.fg("dim", this.hint())}`);
+    lines.push("");
     return lines.map((line) => truncateToWidth(line, panelWidth, ""));
   }
 
   invalidate(): void {}
 
-  private items(): Array<AgentModelRoleChoice | AgentModelChoice | { reset: true } | { provider: string; label: string }> {
-    if (this.stage === "roles") return this.input.roles;
+  private items(): Item[] {
+    if (this.stage === "roles") return this.input.roles.map((role) => ({ kind: "role", role }));
+    if (this.stage === "settings") {
+      const role = this.role;
+      if (!role) return [];
+      const current = this.effective.get(role.name) ?? { model: role.model, thinking: role.thinking };
+      const items: Item[] = [{ kind: "setting", setting: "model" }, { kind: "setting", setting: "thinking" }];
+      if (current.model !== role.configuredModel) items.push({ kind: "setting", setting: "reset-model" });
+      if (current.thinking !== role.configuredThinking) items.push({ kind: "setting", setting: "reset-thinking" });
+      items.push({ kind: "setting", setting: "done" });
+      return items;
+    }
     if (this.stage === "providers") {
       const providers: Array<{ provider: string; label: string }> = [];
       const seen = new Set<string>();
@@ -130,52 +174,117 @@ export class AgentModelConfigurePanel implements Component {
         providers.push({ provider: model.provider, label: model.providerLabel });
       }
       providers.sort((left, right) => left.label.localeCompare(right.label));
-      return [...(this.role && this.role.model !== this.role.configuredModel ? [{ reset: true as const }] : []), ...providers];
+      return providers.map((provider) => ({ kind: "provider", ...provider }));
+    }
+    if (this.stage === "thinking") {
+      return THINKING_LEVELS.map((level) => ({ kind: "thinking", level }));
     }
     const query = this.search.toLowerCase();
     return this.models()
       .filter((model) => model.provider === this.provider)
       .filter((model) => !query || `${model.name} ${model.id}`.toLowerCase().includes(query))
-      .sort((left, right) => left.name.localeCompare(right.name));
+      .sort((left, right) => left.name.localeCompare(right.name))
+      .map((choice) => ({ kind: "model", choice }));
   }
 
-  private renderItem(item: ReturnType<AgentModelConfigurePanel["items"]>[number], selected: boolean, width: number): string {
+  private renderItem(item: Item, selected: boolean, width: number): string {
     const lead = `${selected ? this.theme.fg("accent", "→") : " "} `;
-    if ("configuredModel" in item) {
-      const right = `${item.model.split("/").at(-1)} · ${item.thinking}`;
-      return layoutRow(`${lead}${this.theme.fg("text", item.name)}`, this.theme.fg(item.model === item.configuredModel ? "dim" : "accent", right), width);
+    if (item.kind === "role") {
+      const current = this.effective.get(item.role.name) ?? { model: item.role.model, thinking: item.role.thinking };
+      const overridden = current.model !== item.role.configuredModel || current.thinking !== item.role.configuredThinking;
+      const right = `${current.model.split("/").at(-1)} · ${current.thinking}`;
+      return layoutRow(`${lead}${this.theme.fg("text", item.role.name)}`, this.theme.fg(overridden ? "accent" : "dim", right), width);
     }
-    if ("reset" in item) return `${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset to configured model")}`;
-    if ("label" in item) {
+    if (item.kind === "setting") {
+      if (item.setting === "model") {
+        const current = this.role ? this.effective.get(this.role.name)?.model ?? this.role.model : "";
+        return layoutRow(`${lead}${this.theme.fg("text", "Model")}`, this.theme.fg("dim", current.split("/").at(-1) ?? current), width);
+      }
+      if (item.setting === "thinking") {
+        const current = this.role ? this.effective.get(this.role.name)?.thinking ?? this.role.thinking : "";
+        return layoutRow(`${lead}${this.theme.fg("text", "Thinking")}`, this.theme.fg("dim", current), width);
+      }
+      if (item.setting === "reset-model") return `${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset model")}`;
+      if (item.setting === "reset-thinking") return `${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset thinking")}`;
+      return `${lead}${this.theme.fg("success", "✓")} ${this.theme.fg("text", "Done")}`;
+    }
+    if (item.kind === "provider") {
       const count = this.models().filter((model) => model.provider === item.provider).length;
       return layoutRow(`${lead}${this.theme.fg("text", item.label)}`, this.theme.fg("dim", `${count} ${count === 1 ? "model" : "models"}`), width);
     }
-    const current = this.role?.model === `${item.provider}/${item.id}`;
-    return layoutRow(`${lead}${this.theme.fg("text", item.name)}`, this.theme.fg(current ? "accent" : "dim", current ? "selected" : item.id), width);
+    if (item.kind === "thinking") {
+      const current = this.role ? this.effective.get(this.role.name)?.thinking : undefined;
+      return layoutRow(`${lead}${this.theme.fg("text", item.level)}`, this.theme.fg(item.level === current ? "accent" : "dim", item.level === current ? "selected" : ""), width);
+    }
+    const current = this.role?.model === `${item.choice.provider}/${item.choice.id}`;
+    return layoutRow(`${lead}${this.theme.fg("text", item.choice.name)}`, this.theme.fg(current ? "accent" : "dim", current ? "selected" : item.choice.id), width);
   }
 
   private confirm(): void {
     const item = this.items()[this.index];
     if (!item) return;
-    if (this.stage === "roles" && "configuredModel" in item) {
-      this.role = item;
-      this.stage = "providers";
+    if (item.kind === "role") {
+      this.role = item.role;
+      this.stage = "settings";
       this.index = 0;
       return;
     }
-    if (this.stage === "providers") {
-      if ("reset" in item) {
-        if (this.role) this.done({ role: this.role.name, reset: true });
-        return;
-      }
-      if ("label" in item) {
-        this.provider = item.provider;
-        this.stage = "models";
-        this.index = Math.max(0, this.items().findIndex((model) => "id" in model && this.role?.model === `${model.provider}/${model.id}`));
+    if (item.kind === "setting") {
+      const role = this.role?.name;
+      if (!role) return;
+      if (item.setting === "model") {
+        this.stage = "providers";
+        this.index = 0;
+      } else if (item.setting === "thinking") {
+        this.stage = "thinking";
+        const current = this.effective.get(role)?.thinking ?? this.role!.thinking;
+        this.index = Math.max(0, THINKING_LEVELS.findIndex((level) => level === current));
+      } else if (item.setting === "reset-model") {
+        this.onChange(role, { kind: "reset-model" });
+        this.applyLocal(role, { kind: "reset-model" });
+      } else if (item.setting === "reset-thinking") {
+        this.onChange(role, { kind: "reset-thinking" });
+        this.applyLocal(role, { kind: "reset-thinking" });
+      } else {
+        this.stage = "roles";
+        this.role = undefined;
+        this.index = 0;
       }
       return;
     }
-    if ("id" in item && this.role) this.done({ role: this.role.name, model: `${item.provider}/${item.id}` });
+    if (item.kind === "provider") {
+      this.provider = item.provider;
+      this.stage = "models";
+      this.index = Math.max(0, this.items().findIndex((candidate) =>
+        candidate.kind === "model" && this.role?.model === `${candidate.choice.provider}/${candidate.choice.id}`,
+      ));
+      return;
+    }
+    if (item.kind === "model") {
+      const role = this.role?.name;
+      if (!role) return;
+      this.onChange(role, { kind: "model", model: `${item.choice.provider}/${item.choice.id}` });
+      this.applyLocal(role, { kind: "model", model: `${item.choice.provider}/${item.choice.id}` });
+      this.stage = "settings";
+      this.index = 0;
+      return;
+    }
+    const role = this.role?.name;
+    if (!role) return;
+    this.onChange(role, { kind: "thinking", thinking: item.level });
+    this.applyLocal(role, { kind: "thinking", thinking: item.level });
+    this.stage = "settings";
+    this.index = 0;
+  }
+
+  private applyLocal(role: string, change: AgentRoleConfigureChange): void {
+    const current = this.effective.get(role);
+    if (!current) return;
+    const configured = this.input.roles.find((candidate) => candidate.name === role);
+    if (change.kind === "model") current.model = change.model;
+    else if (change.kind === "thinking") current.thinking = change.thinking;
+    else if (change.kind === "reset-model") current.model = configured?.configuredModel ?? current.model;
+    else if (change.kind === "reset-thinking") current.thinking = configured?.configuredThinking ?? current.thinking;
   }
 
   private models(): AgentModelChoice[] {
@@ -195,8 +304,19 @@ export class AgentModelConfigurePanel implements Component {
     }
   }
 
-  private providerLabel(): string {
-    return this.models().find((model) => model.provider === this.provider)?.providerLabel ?? this.provider ?? "provider";
+  private title(): string {
+    if (this.stage === "roles") return "roles";
+    if (this.stage === "settings") return `settings · ${this.role?.name ?? "role"}`;
+    if (this.stage === "providers") return `providers · ${this.role?.name ?? "role"}`;
+    if (this.stage === "thinking") return `thinking · ${this.role?.name ?? "role"}`;
+    return `models · ${this.models().find((model) => model.provider === this.provider)?.providerLabel ?? this.provider ?? "provider"}`;
+  }
+
+  private hint(): string {
+    const base = `↑↓ select · ↵ confirm · Tab ${this.all ? "scoped" : "all"} · esc ${this.stage === "roles" ? "cancel" : "back"}`;
+    if (this.stage === "models") return `${base}${this.search ? ` · filter: ${this.search}` : " · type to filter"}`;
+    if (this.stage === "settings") return `↑↓ select · ↵ edit · esc back`;
+    return base;
   }
 
   private cancelled(data: string): boolean {
@@ -207,12 +327,13 @@ export class AgentModelConfigurePanel implements Component {
 export async function showAgentModelConfigure(
   ctx: { mode: string; ui: { custom: Function } },
   input: AgentModelConfigureInput,
-): Promise<AgentModelConfigureResult> {
-  if (ctx.mode !== "tui" || input.roles.length === 0 || input.allModels.length === 0) return undefined;
-  return ctx.ui.custom(
-    (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: AgentModelConfigureResult) => void) =>
-      new AgentModelConfigurePanel(input, tui, theme, keybindings, done),
-    { overlay: true, overlayOptions: { width: PANEL_WIDTH, minWidth: 28, maxHeight: "80%", anchor: "center", margin: 1 } },
+  onChange: (role: string, change: AgentRoleConfigureChange) => void,
+): Promise<void> {
+  if (ctx.mode !== "tui" || input.roles.length === 0 || input.allModels.length === 0) return;
+  await ctx.ui.custom(
+    (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: () => void) =>
+      new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done),
+    { overlay: true, overlayOptions: { width: PANEL_WIDTH, minWidth: 30, maxHeight: "80%", anchor: "center", margin: 2 } },
   );
 }
 

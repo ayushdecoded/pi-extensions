@@ -1,6 +1,7 @@
 import type { InlineExtension, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentRole, AgentsConfig } from "../config/agents.ts";
+import type { RoleOverride } from "../config/model-overrides.ts";
 import type { SubagentHeadingGenerator } from "../subagent-headings.ts";
 
 export type Usage = {
@@ -148,8 +149,8 @@ export type RuntimeOptions = {
   routeAccountModel?: <TApi extends Api>(model: Model<TApi>) => Model<TApi>;
   /** Name of the active preset; roles resolve through it. Defaults to default_preset. */
   activeMode?: string;
-  /** Persisted UI model override for one role in a preset, when configured. */
-  roleModelOverride?: (preset: string | undefined, role: string) => string | undefined;
+  /** Persisted UI override (model and/or thinking) for one role in a preset, when configured. */
+  roleOverride?: (preset: string | undefined, role: string) => RoleOverride | undefined;
 };
 
 export type SubagentEvent =
