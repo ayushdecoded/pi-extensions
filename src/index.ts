@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import {
   AGENTS_CONFIG_FILE_NAME,
   THINKING_LEVELS,
@@ -27,6 +27,18 @@ import {
   deliverBackgroundBatchResult,
   renderBackgroundBatchMessage,
 } from "./background.ts";
+import {
+  BACKGROUND_RUN_RESULT_TYPE,
+  deliverBackgroundRunResult,
+  renderBackgroundRunMessage,
+} from "./background-runs/message.ts";
+import { createBackgroundBashTool } from "./background-runs/bash.ts";
+import { ProcessesPanel } from "./background-runs/panel.ts";
+import {
+  BACKGROUND_RUNS_ENTRY_TYPE,
+  BackgroundRunRegistry,
+  reconcileBackgroundRuns,
+} from "./background-runs/registry.ts";
 import { createVisionHookHandler } from "./runtime/vision-hook.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
@@ -34,6 +46,7 @@ import { registerSaveMarkdown } from "./save-md.ts";
 import { SubagentRuntime } from "./runtime/runtime.ts";
 import { replayRuntimeState, SUBAGENT_ENTRY_TYPE } from "./runtime/state.ts";
 import { registerThinkingShortcuts } from "./shortcuts.ts";
+import type { TUI } from "@earendil-works/pi-tui";
 import { registerPackSystemPrompt } from "./system-prompt.ts";
 import { createSubagentHeadingGenerator } from "./subagent-headings.ts";
 import type { SubagentEvent } from "./runtime/types.ts";
@@ -100,6 +113,19 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     footer.requestRender();
   });
   registerPackSystemPrompt(pi);
+
+  // Background terminal runs: detached processes launched through the bash tool,
+  // tracked here, killed on quit (left running on reload), listed via /ps.
+  let composerTui: TUI | undefined;
+  const backgroundRuns = new BackgroundRunRegistry({
+    appendEvent: (event) => pi.appendEntry(BACKGROUND_RUNS_ENTRY_TYPE, event),
+  });
+  backgroundRuns.onSettled((result) => {
+    deliverBackgroundRunResult(result, pi.sendMessage);
+  });
+  backgroundRuns.subscribe(() => composerTui?.requestRender());
+  pi.registerMessageRenderer(BACKGROUND_RUN_RESULT_TYPE, renderBackgroundRunMessage);
+
   pi.registerMessageRenderer(BACKGROUND_SUBAGENT_RESULT_TYPE, renderBackgroundBatchMessage);
   registerThinkingShortcuts(pi);
   registerAccountCommands(pi, accounts);
@@ -183,6 +209,11 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     );
   };
 
+  /** Replace the built-in bash tool with the background-capable wrapper for this session's cwd. */
+  const registerBackgroundBashTool = (cwd: string): void => {
+    pi.registerTool(createBackgroundBashTool({ cwd, registry: backgroundRuns }));
+  };
+
   /** Switch the active preset, persist it, and refresh the tool schema. */
   const switchMode = (ctx: ExtensionContext, name: string | undefined): void => {
     const active = runtime;
@@ -221,22 +252,29 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     }
 
     currentConfig = config;
+    if (backgroundRuns.isEmpty()) {
+      backgroundRuns.seed(reconcileBackgroundRuns(ctx.sessionManager.getEntries()));
+    }
     const activeMode = resolveActiveMode(config, activeModeStore.load(config.path));
 
     if (ctx.mode === "tui") {
       ctx.ui.addAutocompleteProvider(createEmojiAutocompleteProvider);
       ctx.ui.setEditorComponent(
-        (tui, theme, keybindings) =>
-          new FullPasteEditor(
+        (tui, theme, keybindings) => {
+          composerTui = tui;
+          return new FullPasteEditor(
             tui,
             theme,
             keybindings,
             () => runtime?.activeMode,
             () => contextLabelFor(ctx.getContextUsage(), ctx.ui.theme),
-          ),
+            () => backgroundRunsLabel(backgroundRuns, ctx.ui.theme),
+          );
+        },
       );
     }
     await activate(ctx, config, activeMode);
+    registerBackgroundBashTool(ctx.cwd);
     footer.setCodexWeeklyRemaining(codexWeeklyRemaining(accounts));
     if (!registered) {
       registerSubagentTool({ ...config, roles: resolvePreset(config, activeMode).roles });
@@ -322,6 +360,23 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     },
   });
 
+  pi.registerCommand("ps", {
+    description: "Inspect background terminal runs (x kills the selected run)",
+    handler: async (_args, ctx) => {
+      if (ctx.mode !== "tui") {
+        ctx.ui.notify("The background runs panel requires TUI mode.", "warning");
+        return;
+      }
+      await ctx.ui.custom<void>(
+        (tui, theme, keybindings, done) => new ProcessesPanel(backgroundRuns, tui, theme, keybindings, done),
+        {
+          overlay: true,
+          overlayOptions: { anchor: "top-left", width: "100%", maxHeight: "100%" },
+        },
+      );
+    },
+  });
+
   pi.registerCommand("agent-mode", {
     description: "Switch the active agent preset for subagent roles",
     getArgumentCompletions: (prefix) =>
@@ -389,6 +444,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     if (event.reason === "quit") {
       accounts.dispose();
       stopAccounts();
+      backgroundRuns.shutdown();
     }
     footer.dispose();
     const active = runtime;
@@ -401,6 +457,12 @@ function notifyError(ctx: ExtensionContext, error: unknown): void {
   if (!ctx.hasUI) return;
   const message = error instanceof Error ? error.message : String(error);
   ctx.ui.notify(`Subagent extension unavailable: ${message}`, "error");
+}
+
+/** Composer border label for active background runs; empty when none are running. */
+function backgroundRunsLabel(registry: BackgroundRunRegistry, theme: Theme): string {
+  const count = registry.activeCount();
+  return count > 0 ? theme.fg("warning", ` ⏳${count}`) : "";
 }
 
 function describeConfigureChange(change: AgentRoleConfigureChange): string {

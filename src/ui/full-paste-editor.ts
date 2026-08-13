@@ -6,39 +6,47 @@ const PASTE_START = "\x1b[200~";
 const PASTE_END = "\x1b[201~";
 
 /**
- * Render the composer's top border: left `45%/200k ──`, right `◆ mode ◇`,
- * dashes filling the middle. Context is dropped first when narrow.
+ * Render the composer's top border: left `45%/200k`, middle `⏳2` when background
+ * runs are active, right `◆ mode ◇`, dashes filling the middle. Runs drop first
+ * when narrow, then context.
  */
 export function composerBorder(
   width: number,
   mode: string | undefined,
   context: string,
+  runs: string,
   borderColor: (text: string) => string,
 ): string {
   const dash = borderColor("─");
   const left = context;
+  const middle = runs;
   const right = mode ? borderColor(` ◆ ${mode} ◇`) : "";
   const leftWidth = visibleWidth(left);
+  const middleWidth = visibleWidth(middle);
   const rightWidth = visibleWidth(right);
-  if (left && right && leftWidth + rightWidth + 2 > width) {
-    return composerBorder(width, mode, "", borderColor);
+  if (left && middle && right && leftWidth + middleWidth + rightWidth + 4 > width) {
+    return composerBorder(width, mode, context, "", borderColor);
   }
-  if (!left && rightWidth >= width) return borderColor(`◆ ${mode} ◇`.slice(0, width));
-  const fill = Math.max(0, width - leftWidth - rightWidth);
-  return `${left}${dash.repeat(fill)}${right}`;
+  if (left && right && leftWidth + rightWidth + 2 > width) {
+    return composerBorder(width, mode, "", "", borderColor);
+  }
+  if (!left && !middle && rightWidth >= width) return borderColor(`◆ ${mode} ◇`.slice(0, width));
+  const fill = Math.max(0, width - leftWidth - middleWidth - rightWidth);
+  return `${left}${middle}${dash.repeat(fill)}${right}`;
 }
 
 /**
  * The stock editor stores large bracketed pastes behind an atomic marker.
  * Keep the terminal's paste framing, but insert the payload as ordinary text
- * so it remains directly editable. Also renders the active agent preset as a
- * title on the composer's top border.
+ * so it remains directly editable. Also renders the active agent preset and
+ * background-run count on the composer's top border.
  */
 export class FullPasteEditor extends CustomEditor {
   private fullPasteBuffer = "";
   private fullPasteActive = false;
   private readonly getMode: (() => string | undefined) | undefined;
   private readonly getContext: (() => string) | undefined;
+  private readonly getRuns: (() => string) | undefined;
 
   constructor(
     tui: TUI,
@@ -46,10 +54,12 @@ export class FullPasteEditor extends CustomEditor {
     keybindings: KeybindingsManager,
     getMode?: () => string | undefined,
     getContext?: () => string,
+    getRuns?: () => string,
   ) {
     super(tui, theme, keybindings);
     this.getMode = getMode;
     this.getContext = getContext;
+    this.getRuns = getRuns;
   }
 
   override render(width: number): string[] {
@@ -57,8 +67,9 @@ export class FullPasteEditor extends CustomEditor {
     if (lines.length === 0 || lines[0] === undefined) return lines;
     const mode = this.getMode?.();
     const context = this.getContext?.() ?? "";
-    if (!mode && !context) return lines;
-    lines[0] = composerBorder(width, mode, context, this.borderColor);
+    const runs = this.getRuns?.() ?? "";
+    if (!mode && !context && !runs) return lines;
+    lines[0] = composerBorder(width, mode, context, runs, this.borderColor);
     return lines;
   }
 
