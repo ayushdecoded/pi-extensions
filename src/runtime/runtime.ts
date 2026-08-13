@@ -58,6 +58,15 @@ export type RuntimeToolExecution = {
   revision: number;
 };
 
+/**
+ * Extension-bound hooks a surviving runtime re-points when a reload hands it
+ * off to a fresh extension instance. `config` is included so newly loaded
+ * agents.yaml content applies to delegations made after the reload.
+ */
+export type RuntimeReloadRebind = Partial<
+  Pick<RuntimeOptions, "appendEvent" | "generateHeadings" | "accountExtension" | "routeAccountModel" | "modelRegistry" | "config">
+>;
+
 export class SubagentRuntime {
   readonly scheduler: CapacityScheduler;
   readonly state: RuntimeState;
@@ -132,6 +141,26 @@ export class SubagentRuntime {
   refreshRoles(): void {
     this.effectiveRoles = this.resolveRoles(this.activeModeValue);
     this.notify();
+  }
+
+  /**
+   * Re-point extension-bound hooks after a session reload. A reload keeps the
+   * process alive, so in-flight child sessions keep running; this re-binds
+   * persistence, heading generation, account routing, the model registry, and
+   * the loaded config to the live extension instance that adopted this runtime.
+   */
+  rebindForReload(rebind: RuntimeReloadRebind): void {
+    Object.assign(this.options, rebind);
+  }
+
+  /**
+   * Drop the cached shared model runtime so the next child session builds a
+   * fresh one: reload resets the provider registry, so the old instance may
+   * hold stale provider state. In-flight sessions keep their own runtime.
+   */
+  resetModelRuntime(): void {
+    this.modelRuntime = undefined;
+    this.modelRuntimePromise = undefined;
   }
 
   subscribe(listener: () => void): () => void {
@@ -628,7 +657,13 @@ export class SubagentRuntime {
 
   private record(event: SubagentEvent): void {
     applyEvent(this.state, event);
-    this.options.appendEvent(event);
+    try {
+      this.options.appendEvent(event);
+    } catch {
+      // The session API can be invalidated by a reload or session replacement
+      // while child work is still settling. The event stays applied to the
+      // in-memory state and is buffered or replayed across the handoff.
+    }
     this.notify();
   }
 

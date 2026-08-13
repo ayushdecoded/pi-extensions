@@ -73,6 +73,49 @@ import { canonicalProviderId } from "./accounts/providers.ts";
 
 const WIDGET_KEY = "pi-subagents";
 
+/**
+ * Reload survival. `/reload` re-imports this extension module (the loader
+ * clears its cache), so module-level state is wiped — but the process and the
+ * in-flight child sessions survive. The handoff registries therefore live on
+ * `globalThis`, keyed by root session id, so the reloaded module instance can
+ * adopt the runtime (and route settled follow-ups) that the old instance left
+ * running.
+ */
+const RELOAD_STATE_KEY = "__piSubagentsReloadState__";
+
+type ReloadState = {
+  /** Runtimes handed off by a session reload, awaiting adoption by the next session_start. */
+  detachedRuntimes: Map<string, SubagentRuntime>;
+  /** Events recorded while a runtime was detached between reload and adoption. */
+  detachedEventBuffer: Map<string, SubagentEvent[]>;
+  /** The current runtime per root session id, for background-result routing. */
+  sessionRuntimes: Map<string, SubagentRuntime>;
+  /** The live extension sendMessage per root session id, resolved at settle time. */
+  sessionSenders: Map<string, ExtensionAPI["sendMessage"]>;
+  /** Follow-ups produced while a session was between reload and adoption. */
+  bufferedFollowUps: Array<{
+    sessionId: string;
+    message: Parameters<ExtensionAPI["sendMessage"]>[0];
+    options?: Parameters<ExtensionAPI["sendMessage"]>[1];
+  }>;
+};
+
+function reloadState(): ReloadState {
+  const global = globalThis as unknown as { [RELOAD_STATE_KEY]?: ReloadState };
+  let state = global[RELOAD_STATE_KEY];
+  if (!state) {
+    state = {
+      detachedRuntimes: new Map(),
+      detachedEventBuffer: new Map(),
+      sessionRuntimes: new Map(),
+      sessionSenders: new Map(),
+      bufferedFollowUps: [],
+    };
+    global[RELOAD_STATE_KEY] = state;
+  }
+  return state;
+}
+
 export {
   AGENTS_CONFIG_FILE_NAME,
   THINKING_LEVELS,
@@ -96,6 +139,10 @@ export type {
 };
 
 export default function subagentExtension(pi: ExtensionAPI): void {
+  const reload = reloadState();
+  // Closure-local aliases of the process-global handoff registries: each
+  // reloaded module instance sees the same Map/array objects.
+  const { detachedRuntimes, detachedEventBuffer, sessionRuntimes, sessionSenders, bufferedFollowUps } = reload;
   let runtime: SubagentRuntime | undefined;
   let currentConfig: AgentsConfig | undefined;
   let registered = false;
@@ -148,22 +195,26 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   }), undefined, accounts.childExtension, accounts.routeModel));
 
   const activate = async (ctx: ExtensionContext, config: AgentsConfig, activeMode?: string): Promise<void> => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    // Background batches may settle after this session_start; route their
+    // follow-up through the live extension API for this session.
+    sessionSenders.set(sessionId, (message, options) => pi.sendMessage(message, options));
+
     const previous = runtime;
     runtime = undefined;
-    await previous?.shutdown();
 
-    const allState = replayRuntimeState(ctx.sessionManager.getEntries());
-    const activeState = replayRuntimeState(ctx.sessionManager.getBranch());
-    runtime = new SubagentRuntime(
-      {
-        rootSessionId: ctx.sessionManager.getSessionId(),
-        rootSessionFile: ctx.sessionManager.getSessionFile(),
-        cwd: ctx.cwd,
+    let next: SubagentRuntime;
+    const adopted = detachedRuntimes.get(sessionId);
+    if (adopted) {
+      // A reload handed this runtime off with its child sessions still running.
+      // Adopt it: persist events recorded during the handoff gap, re-point the
+      // extension-bound hooks at this live instance, and realign with the
+      // freshly loaded config (a preset may have been renamed or removed).
+      detachedRuntimes.delete(sessionId);
+      const buffered = detachedEventBuffer.get(sessionId) ?? [];
+      detachedEventBuffer.delete(sessionId);
+      adopted.rebindForReload({
         config,
-        activeMode,
-        roleOverride: (preset, role) => modelOverrideStore.get(config.path, preset, role),
-        modelRegistry: ctx.modelRegistry,
-        reservedHandles: new Set(allState.agents.keys()),
         appendEvent: (event: SubagentEvent) => pi.appendEntry(SUBAGENT_ENTRY_TYPE, event),
         generateHeadings: createSubagentHeadingGenerator(
           ctx.modelRegistry,
@@ -171,15 +222,69 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         ),
         accountExtension: accounts.childExtension,
         routeAccountModel: accounts.routeModel,
-      },
-      activeState,
-    );
-    runtime.reconcileInterrupted();
-    const sessionRuntime = runtime;
-    installHeader(ctx, config, pi.getCommands(), sessionRuntime);
+        modelRegistry: ctx.modelRegistry,
+      });
+      try {
+        adopted.setActiveMode(activeMode);
+      } catch {
+        adopted.setActiveMode(undefined);
+      }
+      // Reload resets the provider registry; rebuild the shared model runtime
+      // so new child sessions resolve the freshly registered providers.
+      adopted.resetModelRuntime();
+      // Deliver follow-ups that settled during the reload gap through this API.
+      for (let index = bufferedFollowUps.length - 1; index >= 0; index -= 1) {
+        const followUp = bufferedFollowUps[index]!;
+        if (followUp.sessionId !== sessionId) continue;
+        bufferedFollowUps.splice(index, 1);
+        try {
+          pi.sendMessage(followUp.message, followUp.options);
+        } catch {
+          // Best-effort; the settled state stays visible in /agents.
+        }
+      }
+      for (const event of buffered) {
+        try {
+          pi.appendEntry(SUBAGENT_ENTRY_TYPE, event);
+        } catch {
+          // Best-effort persistence; the in-memory state already includes these.
+        }
+      }
+      next = adopted;
+    } else {
+      await previous?.shutdown();
+
+      const allState = replayRuntimeState(ctx.sessionManager.getEntries());
+      const activeState = replayRuntimeState(ctx.sessionManager.getBranch());
+      next = new SubagentRuntime(
+        {
+          rootSessionId: sessionId,
+          rootSessionFile: ctx.sessionManager.getSessionFile(),
+          cwd: ctx.cwd,
+          config,
+          activeMode,
+          roleOverride: (preset, role) => modelOverrideStore.get(config.path, preset, role),
+          modelRegistry: ctx.modelRegistry,
+          reservedHandles: new Set(allState.agents.keys()),
+          appendEvent: (event: SubagentEvent) => pi.appendEntry(SUBAGENT_ENTRY_TYPE, event),
+          generateHeadings: createSubagentHeadingGenerator(
+            ctx.modelRegistry,
+            () => accounts.selectedProviderId("openai-codex"),
+          ),
+          accountExtension: accounts.childExtension,
+          routeAccountModel: accounts.routeModel,
+        },
+        activeState,
+      );
+      next.reconcileInterrupted();
+    }
+
+    runtime = next;
+    sessionRuntimes.set(sessionId, next);
+    installHeader(ctx, config, pi.getCommands(), next);
     if (ctx.mode === "tui") {
-      ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => new AgentsPanel(sessionRuntime, tui, theme));
-      footer.install(ctx, sessionRuntime);
+      ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => new AgentsPanel(next, tui, theme));
+      footer.install(ctx, next);
     }
   };
 
@@ -197,10 +302,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             const owner = runtime;
             if (!owner) throw new Error("Subagent runtime is not available for this session.");
             const launch = owner.startRootBatch(requests);
+            const sessionId = owner.options.rootSessionId;
             void deliverBackgroundBatchResult(
               launch,
-              (message, options) => pi.sendMessage(message, options),
-              () => runtime === owner,
+              (message, options) => sessionSenders.get(sessionId)?.(message, options),
+              // True as long as this session's current runtime is the one that
+              // owns the batch — including when a reload adopts the same object.
+              () => sessionRuntimes.get(sessionId) === owner,
             );
             return launch;
           },
@@ -449,6 +557,28 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     footer.dispose();
     const active = runtime;
     runtime = undefined;
+    if (event.reason === "reload" && active) {
+      // Reload keeps the process alive and re-invokes this extension. Hand the
+      // runtime off with its child sessions still running and buffer recorded
+      // events and follow-ups until the next session_start adopts it.
+      const sessionId = active.options.rootSessionId;
+      const buffer: SubagentEvent[] = [];
+      detachedEventBuffer.set(sessionId, buffer);
+      active.rebindForReload({ appendEvent: (event: SubagentEvent) => buffer.push(event) });
+      // A batch settling during the reload gap must still report: hold its
+      // follow-up until the adopting instance drains it in activate().
+      sessionSenders.set(sessionId, (message, options) => {
+        bufferedFollowUps.push({ sessionId, message, options });
+      });
+      detachedRuntimes.set(sessionId, active);
+      return;
+    }
+    const sessionId = ctx.sessionManager.getSessionId();
+    sessionRuntimes.delete(sessionId);
+    sessionSenders.delete(sessionId);
+    for (let index = bufferedFollowUps.length - 1; index >= 0; index -= 1) {
+      if (bufferedFollowUps[index]!.sessionId === sessionId) bufferedFollowUps.splice(index, 1);
+    }
     await active?.shutdown();
   });
 }

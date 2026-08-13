@@ -128,6 +128,8 @@ subagent({
 
 After every requested agent has settled—including failures, timeouts, and cancellations—the extension delivers one aggregated follow-up to the main session and triggers a turn when idle. A compact transcript card marks the result (`⟳ Background subagents · settled`) with one colored line per agent; expand it to read the full outputs the model received. Nested child-agent tools do not expose `background`; their delegations remain synchronous, including when the root batch itself is running in the background.
 
+Detached batches survive `/reload`: the reload keeps the process alive and re-invokes this extension, so the runtime hands its running child sessions off to the reloaded instance instead of aborting them. The agents keep working, their state stays visible in `/agents`, and the aggregated result is still delivered as a follow-up through the live session API. Branch navigation (e.g. `/back`, `/fork` moves within the session tree), quitting, or switching to another session still aborts running agents.
+
 ## Session transfer and prompt commands
 
 Use `/handoff [optional next goal]` to transfer the recorded work into a fresh parent-linked session. The command runs a normal main-agent summary turn with the existing tools and subagent orchestration available, waits for it to settle, and opens the generated chronological handoff for review. Accepting the review creates the new session and places the edited handoff in its editor; it is never submitted automatically. With no argument, the handoff continues the current work from its present state. For unusually large, compacted, or incomplete histories, the agent may use read-only Atlas subagents to inspect the saved session history.

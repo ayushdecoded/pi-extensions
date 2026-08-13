@@ -61,6 +61,26 @@ test("background completion is suppressed after its owning runtime is replaced",
   assert.deepEqual(sent, []);
 });
 
+test("background completion resolves its sender at settle time (survives reload)", async () => {
+  const result: BatchResult = { batchId: "reloaded", runs: [], allRuns: [], durationMs: 0 };
+  const sent: unknown[] = [];
+  // The delivery was started by a pre-reload instance; the sender is looked up
+  // lazily so a post-reload instance can take it over before the batch settles.
+  let current: (message: unknown, options: unknown) => void = () => {
+    throw new Error("Extension API context is no longer active");
+  };
+  const delivery = deliverBackgroundBatchResult(
+    { batchId: "reloaded", completion: Promise.resolve(result) },
+    (((message: unknown, options: unknown) => current(message, options)) as any),
+    () => true,
+  );
+  current = (message: unknown) => sent.push(message);
+  await delivery;
+
+  assert.equal(sent.length, 1);
+  assert.equal((sent[0] as { customType?: string }).customType, BACKGROUND_SUBAGENT_RESULT_TYPE);
+});
+
 test("unexpected background batch failures still report back", async () => {
   const sent: Array<{ message: any; options: any }> = [];
   await deliverBackgroundBatchResult(

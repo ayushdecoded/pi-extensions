@@ -563,6 +563,22 @@ test("native usage deltas keep cache fields and cost without reinterpretation", 
   );
 });
 
+test("rebindForReload re-points extension-bound hooks for the adopting instance", () => {
+  const runtime = validationRuntime([]);
+  const config = runtime.options.config;
+  const rebind = {
+    config: { ...config, defaults: { ...config.defaults, concurrency: 3 } },
+    appendEvent: () => {},
+    modelRegistry: {} as any,
+  };
+  runtime.rebindForReload(rebind as any);
+
+  assert.equal(runtime.options.appendEvent, rebind.appendEvent);
+  assert.equal(runtime.options.modelRegistry, rebind.modelRegistry);
+  assert.equal(runtime.options.config.defaults.concurrency, 3, "freshly loaded config applies to new delegations");
+  assert.equal(runtime.options.rootSessionId, "validation-root", "session identity survives the handoff");
+});
+
 function validationRuntime(events: unknown[]): SubagentRuntime {
   return new SubagentRuntime({
     rootSessionId: "validation-root",
