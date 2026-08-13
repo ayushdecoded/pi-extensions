@@ -148,6 +148,8 @@ export type RuntimeOptions = {
   routeAccountModel?: <TApi extends Api>(model: Model<TApi>) => Model<TApi>;
   /** Name of the active preset; roles resolve through it. Defaults to default_preset. */
   activeMode?: string;
+  /** Persisted UI model override for one role in a preset, when configured. */
+  roleModelOverride?: (preset: string | undefined, role: string) => string | undefined;
 };
 
 export type SubagentEvent =

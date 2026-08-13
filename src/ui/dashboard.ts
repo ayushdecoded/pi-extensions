@@ -20,6 +20,11 @@ type FlatNode = {
 };
 const EMPTY_RUNNING_CALLS: ReadonlySet<string> = new Set();
 
+function roleConfiguration(runtime: SubagentRuntime, roleName: string) {
+  return runtime.activeRoles?.find((role) => role.name.toLowerCase() === roleName.toLowerCase())
+    ?? runtime.options.config?.roles.find((role) => role.name.toLowerCase() === roleName.toLowerCase());
+}
+
 export class AgentsDashboard implements Component {
   private mode: Mode = "tree";
   private selectedInvocationId?: string;
@@ -135,7 +140,7 @@ export class AgentsDashboard implements Component {
         const selected = invocation.id === this.selectedInvocationId;
         const marker = selected ? this.theme.fg("accent", "❯") : " ";
         const followup = invocation.followup ? ` ${this.theme.fg("accent", "↻")}` : "";
-        const configured = this.runtime.options.config?.roles.find((role) => role.name.toLowerCase() === invocation.role.toLowerCase());
+        const configured = roleConfiguration(this.runtime, invocation.role);
         const model = configured?.model.split("/").at(-1) ?? "?";
         const left = ` ${marker} ${row.treePrefix} ${statusMarker(invocation, this.theme)} ${roleText(invocation.role, invocation.role, this.theme)}${followup}`;
         const rightParts = [
@@ -219,7 +224,7 @@ export class AgentsDashboard implements Component {
     if (this.follow) this.scroll = maxScroll;
     this.scroll = Math.min(this.scroll, maxScroll);
     const followup = invocation.followup ? ` ${this.theme.fg("accent", "↻")}` : "";
-    const configured = this.runtime.options.config?.roles.find((role) => role.name.toLowerCase() === invocation.role.toLowerCase());
+    const configured = roleConfiguration(this.runtime, invocation.role);
     const model = configured?.model.split("/").at(-1) ?? "?";
     const role = `${roleText(invocation.role, invocation.role, this.theme)}${followup}`;
     const requestHeading = invocation.heading ?? compactTaskHeading(invocation.task);

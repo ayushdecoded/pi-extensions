@@ -10,8 +10,7 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { AgentsConfig } from "../config/agents.ts";
-import { resolvePreset } from "../config/agents.ts";
+import type { AgentRole, AgentsConfig } from "../config/agents.ts";
 import { roleRgb, roleText } from "./roles.ts";
 
 const RESET = "\x1b[0m";
@@ -72,7 +71,7 @@ export function installHeader(
   ctx: ExtensionContext,
   config: AgentsConfig,
   commands: readonly { name: string; source: string; sourceInfo: { source: string } }[],
-  runtime: { activeMode: string | undefined; subscribe(listener: () => void): () => void },
+  runtime: { activeMode: string | undefined; activeRoles: readonly AgentRole[]; subscribe(listener: () => void): () => void },
 ): void {
   if (ctx.mode !== "tui") return;
   const title = formatDirectory(ctx.cwd);
@@ -101,7 +100,7 @@ export function installHeader(
         const info: HeaderInfo = {
           ...base,
           ...(runtime.activeMode === undefined ? {} : { mode: runtime.activeMode }),
-          agents: agentsForMode(config, runtime.activeMode),
+          agents: agentsForRoles(runtime.activeRoles),
         };
         return renderHeader(title, width, info, theme);
       },
@@ -110,8 +109,8 @@ export function installHeader(
   ctx.ui.setTitle(`pi — ${title}`);
 }
 
-function agentsForMode(config: AgentsConfig, mode: string | undefined): HeaderInfo["agents"] {
-  return resolvePreset(config, mode).roles
+function agentsForRoles(roles: readonly AgentRole[]): HeaderInfo["agents"] {
+  return [...roles]
     .sort((left, right) => roleOrder(left.name) - roleOrder(right.name))
     .map((role) => ({
       name: role.name,

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   BACKGROUND_SUBAGENT_RESULT_TYPE,
   deliverBackgroundBatchResult,
+  renderBackgroundBatchMessage,
+  type BackgroundBatchResultDetails,
 } from "../src/background.ts";
 import { ZERO_USAGE, type BatchResult } from "../src/runtime/types.ts";
 
@@ -32,10 +35,18 @@ test("background batches report once after aggregate completion with follow-up d
 
   assert.equal(sent.length, 1);
   assert.equal(sent[0]!.message.customType, BACKGROUND_SUBAGENT_RESULT_TYPE);
-  assert.equal(sent[0]!.message.display, false);
+  assert.equal(sent[0]!.message.display, true, "the transcript card must be visible");
   assert.match(sent[0]!.message.content, /batch-1 · settled/);
   assert.match(sent[0]!.message.content, /Atlas · atlas-1 · complete[\s\S]*evidence/);
   assert.match(sent[0]!.message.content, /Vigil · vigil-1 · failed[\s\S]*timed out/);
+  assert.deepEqual(sent[0]!.message.details, {
+    batchId: "batch-1",
+    durationMs: 20,
+    runs: [
+      { role: "Atlas", agent: "atlas-1", status: "complete" },
+      { role: "Vigil", agent: "vigil-1", status: "failed", error: "timed out" },
+    ],
+  });
   assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
@@ -59,6 +70,7 @@ test("unexpected background batch failures still report back", async () => {
   );
   assert.equal(sent.length, 1);
   assert.match(sent[0]!.message.content, /broken · failed[\s\S]*runtime unavailable/);
+  assert.deepEqual(sent[0]!.message.details, { batchId: "broken", durationMs: 0, runs: [], error: "runtime unavailable" });
   assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
 });
 
@@ -69,4 +81,33 @@ test("a session-replacement send race does not reject detached completion", asyn
     (() => { throw new Error("Extension API context is no longer active"); }) as any,
     () => true,
   ));
+});
+
+test("the transcript renderer shows a compact indicator and full outputs when expanded", () => {
+  const details: BackgroundBatchResultDetails = {
+    batchId: "a3f941e0-1c7b",
+    durationMs: 60_000,
+    runs: [
+      { role: "Atlas", agent: "atlas-1", status: "complete" },
+      { role: "Vigil", agent: "vigil-2", status: "failed", error: "timed out" },
+    ],
+  };
+  const theme = { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text } as unknown as Theme;
+  const collapsed = renderBackgroundBatchMessage(
+    { customType: BACKGROUND_SUBAGENT_RESULT_TYPE, content: "[full output]", display: true, details, timestamp: 1 } as any,
+    { expanded: false, outputPad: 1 },
+    theme,
+  )!.render(80).join("\n");
+  assert.match(collapsed, /Background subagents.*settled.*a3f941e0/);
+  assert.match(collapsed, /1 complete · 1 failed/);
+  assert.match(collapsed, /✓ Atlas · atlas-1 · complete/);
+  assert.match(collapsed, /✗ Vigil · vigil-2 · failed · timed out/);
+  assert.doesNotMatch(collapsed, /\[full output\]/);
+
+  const expanded = renderBackgroundBatchMessage(
+    { customType: BACKGROUND_SUBAGENT_RESULT_TYPE, content: "[full output]", display: true, details, timestamp: 1 } as any,
+    { expanded: true, outputPad: 1 },
+    theme,
+  )!.render(80).join("\n");
+  assert.match(expanded, /outputs[\s\S]*\[full output\]/);
 });

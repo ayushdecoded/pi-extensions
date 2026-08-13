@@ -21,7 +21,12 @@ import type {
   ThinkingLevel,
 } from "./config/agents.ts";
 import { createActiveModeStore, resolveActiveMode } from "./config/mode.ts";
-import { deliverBackgroundBatchResult } from "./background.ts";
+import { createAgentModelOverrideStore } from "./config/model-overrides.ts";
+import {
+  BACKGROUND_SUBAGENT_RESULT_TYPE,
+  deliverBackgroundBatchResult,
+  renderBackgroundBatchMessage,
+} from "./background.ts";
 import { createVisionHookHandler } from "./runtime/vision-hook.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
@@ -34,6 +39,10 @@ import { createSubagentHeadingGenerator } from "./subagent-headings.ts";
 import type { SubagentEvent } from "./runtime/types.ts";
 import { createSubagentTool } from "./tool.ts";
 import { AgentsDashboard } from "./ui/dashboard.ts";
+import {
+  showAgentModelConfigure,
+  type AgentModelChoice,
+} from "./ui/agents-configure.ts";
 import { createFooterController, contextLabelFor } from "./ui/footer.ts";
 import { installHeader } from "./ui/header.ts";
 import { AgentsPanel } from "./ui/panel.ts";
@@ -46,6 +55,7 @@ import { createAccountController, type AccountController } from "./accounts/cont
 import { registerAccountCommands } from "./accounts/commands.ts";
 import { registerVoiceInput } from "./voice-input.ts";
 import registerWebSearch from "./web-search/index.ts";
+import { canonicalProviderId } from "./accounts/providers.ts";
 
 const WIDGET_KEY = "pi-subagents";
 
@@ -76,6 +86,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   let currentConfig: AgentsConfig | undefined;
   let registered = false;
   const activeModeStore = createActiveModeStore();
+  const modelOverrideStore = createAgentModelOverrideStore();
   const accounts = createAccountController(pi);
   const footer = createFooterController(pi, {
     accountName: (providerId) => {
@@ -88,6 +99,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     footer.requestRender();
   });
   registerPackSystemPrompt(pi);
+  pi.registerMessageRenderer(BACKGROUND_SUBAGENT_RESULT_TYPE, renderBackgroundBatchMessage);
   registerThinkingShortcuts(pi);
   registerAccountCommands(pi, accounts);
   registerVoiceInput(pi, { codexProvider: () => accounts.selectedProviderId("openai-codex") });
@@ -122,6 +134,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         cwd: ctx.cwd,
         config,
         activeMode,
+        roleModelOverride: (preset, role) => modelOverrideStore.get(config.path, preset, role),
         modelRegistry: ctx.modelRegistry,
         reservedHandles: new Set(allState.agents.keys()),
         appendEvent: (event: SubagentEvent) => pi.appendEntry(SUBAGENT_ENTRY_TYPE, event),
@@ -237,19 +250,56 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   });
 
   pi.registerCommand("agents", {
-    description: "Inspect subagent batches, trees, and transcripts",
-    handler: async (_args, ctx) => {
-      if (!runtime) {
+    description: "Inspect subagent runs or configure role models",
+    getArgumentCompletions: (prefix) =>
+      "configure".startsWith(prefix.trim().toLowerCase())
+        ? [{ value: "configure", label: "configure", description: "Choose models for subagent roles" }]
+        : null,
+    handler: async (args, ctx) => {
+      const active = runtime;
+      if (!active) {
         ctx.ui.notify("Subagent runtime is unavailable for this session.", "warning");
+        return;
+      }
+      const command = args.trim().toLowerCase();
+      if (command === "configure") {
+        if (ctx.mode !== "tui") {
+          ctx.ui.notify("The agents model picker requires TUI mode.", "warning");
+          return;
+        }
+        const configured = resolvePreset(active.options.config, active.activeMode).roles;
+        const result = await showAgentModelConfigure(ctx, {
+          roles: active.activeRoles.map((role) => ({
+            name: role.name,
+            model: role.model,
+            configuredModel: configured.find((candidate) => candidate.name === role.name)?.model ?? role.model,
+            thinking: role.thinking,
+          })),
+          scopedModels: projectAgentModels(ctx.scopedModels.map((item) => item.model), ctx),
+          allModels: projectAgentModels(ctx.modelRegistry.getAvailable(), ctx),
+        });
+        if (!result) return;
+        const role = configured.find((candidate) => candidate.name === result.role);
+        if (!role) {
+          ctx.ui.notify(`Unknown active agent role: ${result.role}.`, "error");
+          return;
+        }
+        const model = "reset" in result ? undefined : result.model;
+        modelOverrideStore.set(active.options.config.path, active.activeMode, role.name, model);
+        active.refreshRoleModels();
+        ctx.ui.notify(`${role.name} model: ${model ?? role.model}`, "info");
+        return;
+      }
+      if (command) {
+        ctx.ui.notify("Usage: /agents [configure]", "warning");
         return;
       }
       if (ctx.mode !== "tui") {
         ctx.ui.notify("The agents dashboard requires TUI mode.", "warning");
         return;
       }
-      const selectedRuntime = runtime;
       await ctx.ui.custom<void>(
-        (tui, theme, keybindings, done) => new AgentsDashboard(selectedRuntime, tui, theme, keybindings, done),
+        (tui, theme, keybindings, done) => new AgentsDashboard(active, tui, theme, keybindings, done),
         {
           overlay: true,
           overlayOptions: { anchor: "top-left", width: "100%", maxHeight: "100%" },
@@ -345,4 +395,24 @@ function codexWeeklyRemaining(accounts: AccountController): number | undefined {
     window.windowSeconds === 604_800 || window.name.toLowerCase().includes("week"),
   );
   return weekly?.usedPercent === undefined ? undefined : Math.max(0, Math.min(100, 100 - weekly.usedPercent));
+}
+
+/** Canonicalize named-account aliases and remove duplicate provider/model rows. */
+function projectAgentModels(
+  models: ReadonlyArray<{ provider: string; id: string; name: string }>,
+  ctx: ExtensionContext,
+): AgentModelChoice[] {
+  const choices = new Map<string, AgentModelChoice>();
+  for (const model of models) {
+    const provider = canonicalProviderId(model.provider);
+    const key = `${provider}/${model.id}`;
+    if (choices.has(key)) continue;
+    choices.set(key, {
+      provider,
+      providerLabel: ctx.modelRegistry.getProviderDisplayName(provider),
+      id: model.id,
+      name: model.name || model.id,
+    });
+  }
+  return [...choices.values()];
 }

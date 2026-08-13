@@ -119,7 +119,16 @@ export class SubagentRuntime {
   }
 
   private resolveRoles(presetName: string | undefined): AgentRole[] {
-    return resolvePreset(this.options.config, presetName).roles;
+    return resolvePreset(this.options.config, presetName).roles.map((role) => {
+      const model = this.options.roleModelOverride?.(presetName, role.name);
+      return model && model !== role.model ? { ...role, model } : role;
+    });
+  }
+
+  /** Re-read persisted model overrides. Running invocations keep their existing sessions. */
+  refreshRoleModels(): void {
+    this.effectiveRoles = this.resolveRoles(this.activeModeValue);
+    this.notify();
   }
 
   subscribe(listener: () => void): () => void {

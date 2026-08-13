@@ -102,6 +102,42 @@ test("switching the active preset re-resolves roles and notifies subscribers", (
   assert.throws(() => runtime.setActiveMode("missing"), /Unknown agents preset: missing\./);
 });
 
+test("persisted role model overrides are preset-scoped and refresh immediately", () => {
+  const selected = new Map<string, string>([["deep:Atlas", "provider/deep-override"]]);
+  const runtime = new SubagentRuntime({
+    rootSessionId: "override-root",
+    cwd: "/tmp",
+    config: {
+      path: "/tmp/agents.yaml",
+      version: 1,
+      defaults: { maxDepth: 1, concurrency: 1, timeoutMinutes: 10 },
+      defaultPreset: "deep",
+      roles: [{
+        name: "Atlas", description: "Explore", model: "provider/base", thinking: "medium",
+        promptPath: "agents/atlas.md", promptFile: "/tmp/atlas.md", tools: ["read"], delegates: [],
+      }],
+      presets: [
+        { name: "deep", roleNames: ["Atlas"], overrides: new Map([["Atlas", { model: "provider/deep" }]]) },
+        { name: "light", roleNames: ["Atlas"], overrides: new Map([["Atlas", { model: "provider/light" }]]) },
+      ],
+    },
+    activeMode: "deep",
+    roleModelOverride: (preset, role) => selected.get(`${preset}:${role}`),
+    modelRegistry: {} as any,
+    appendEvent: () => {},
+  });
+  let updates = 0;
+  runtime.subscribe(() => { updates += 1; });
+
+  assert.equal(runtime.activeRoles[0]!.model, "provider/deep-override");
+  runtime.setActiveMode("light");
+  assert.equal(runtime.activeRoles[0]!.model, "provider/light");
+  selected.set("light:Atlas", "provider/light-override");
+  runtime.refreshRoleModels();
+  assert.equal(runtime.activeRoles[0]!.model, "provider/light-override");
+  assert.equal(updates, 2);
+});
+
 test("configured timeouts are defaults rather than maximum limits", () => {
   const runtime = validationRuntime([]);
   const atlas = runtime.options.config.roles[0]!;

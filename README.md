@@ -82,6 +82,8 @@ When a text-only role model reads an image file, the `read` result keeps the ima
 
 The active preset starts from `default_preset` (or the last selected one, persisted in `~/.config/pi/agents-mode.json` per config path). Use `/agent-mode` (with argument completion, or a picker when run bare) to choose a preset, or `Ctrl+Shift+S` to cycle through them. Switching takes effect immediately for new subagent calls and re-renders the header (role models + `mode:` label) and footer (`◆ mode`).
 
+Use `/agents configure` to choose a model for each role in a role → provider → model overlay. The picker starts with Pi's session-scoped models; press `Tab` to toggle all available models and type on the model screen to filter. Choices apply immediately to new invocations, leave running agents unchanged, and persist in `~/.config/pi/agents-model-overrides.json` per `agents.yaml` path, active preset, and role. Named plan-account aliases are deduplicated to their canonical provider, so `/account` continues to select the account used. Reset restores the model declared by the active preset without rewriting `agents.yaml`.
+
 Prompt paths are relative to the selected `agents.yaml`. Project configuration is rejected when Pi does not trust the project. `subagent` is not listed in `tools`; the runtime adds a filtered tool automatically when `delegates` is non-empty.
 
 ## Tool
@@ -120,7 +122,7 @@ subagent({
 });
 ```
 
-The call returns a batch receipt immediately. After every requested agent has settled—including failures, timeouts, and cancellations—the extension delivers one aggregated follow-up to the main session and triggers a turn when idle. Nested child-agent tools do not expose `background`; their delegations remain synchronous, including when the root batch itself is running in the background.
+The call returns a batch receipt immediately. After every requested agent has settled—including failures, timeouts, and cancellations—the extension delivers one aggregated follow-up to the main session and triggers a turn when idle. A compact transcript card marks the result (`⟳ Background subagents · settled`) with one colored line per agent; expand it to read the full outputs the model received. Nested child-agent tools do not expose `background`; their delegations remain synchronous, including when the root batch itself is running in the background.
 
 ## Session transfer and prompt commands
 
