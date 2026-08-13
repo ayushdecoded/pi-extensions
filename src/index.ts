@@ -102,6 +102,8 @@ type ReloadState = {
   backgroundRunRegistries: Map<string, BackgroundRunRegistry>;
   /** The live extension sendMessage per root session id, resolved at run settle time. */
   backgroundRunSenders: Map<string, ExtensionAPI["sendMessage"]>;
+  /** Session ids whose composer agents panel is minimized to one summary line. */
+  minimizedPanels: Set<string>;
 };
 
 function reloadState(): ReloadState {
@@ -116,9 +118,13 @@ function reloadState(): ReloadState {
       bufferedFollowUps: [],
       backgroundRunRegistries: new Map(),
       backgroundRunSenders: new Map(),
+      minimizedPanels: new Set(),
     };
     global[RELOAD_STATE_KEY] = state;
   }
+  // A reload adopts the state an older extension instance created, which may
+  // lack fields added since. Backfill so consumers never read undefined.
+  state.minimizedPanels ??= new Set();
   return state;
 }
 
@@ -131,6 +137,7 @@ export {
   packageAgentsPath,
   parseAgentsConfig,
   projectAgentsPath,
+  reloadState,
   resolvePreset,
   validateAgentsConfig,
   validateAgentsFile,
@@ -148,7 +155,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   const reload = reloadState();
   // Closure-local aliases of the process-global handoff registries: each
   // reloaded module instance sees the same Map/array objects.
-  const { detachedRuntimes, detachedEventBuffer, sessionRuntimes, sessionSenders, bufferedFollowUps, backgroundRunRegistries, backgroundRunSenders } = reload;
+  const { detachedRuntimes, detachedEventBuffer, sessionRuntimes, sessionSenders, bufferedFollowUps, backgroundRunRegistries, backgroundRunSenders, minimizedPanels } = reload;
   let runtime: SubagentRuntime | undefined;
   let currentConfig: AgentsConfig | undefined;
   let registered = false;
@@ -171,6 +178,19 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   // tracked per session, killed on quit (left running on reload), listed via /ps.
   let composerTui: TUI | undefined;
   let backgroundRuns: BackgroundRunRegistry | undefined;
+  /** Per-session setters that collapse/restore the composer agents panel. */
+  const panelMinimizeSetters = new Map<string, (minimized: boolean) => void>();
+
+  /** Collapse or restore the composer agents panel for this session. */
+  const setAgentsPanelMinimized = (ctx: ExtensionContext, minimized: boolean): void => {
+    const set = panelMinimizeSetters.get(ctx.sessionManager.getSessionId());
+    if (!set) {
+      ctx.ui.notify("The agents panel is only available in TUI mode.", "warning");
+      return;
+    }
+    set(minimized);
+    ctx.ui.notify(minimized ? "Agents panel minimized (alt+m to expand)" : "Agents panel expanded (alt+m to minimize)", "info");
+  };
 
   /**
    * The registry for this session. A reload re-imports this module, so the
@@ -309,7 +329,16 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     sessionRuntimes.set(sessionId, next);
     installHeader(ctx, config, pi.getCommands(), next);
     if (ctx.mode === "tui") {
-      ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => new AgentsPanel(next, tui, theme));
+      const sessionId = next.options.rootSessionId;
+      ctx.ui.setWidget(WIDGET_KEY, (tui, theme) => {
+        const panel = new AgentsPanel(next, tui, theme, () => minimizedPanels.has(sessionId));
+        panelMinimizeSetters.set(sessionId, (minimized) => {
+          if (minimized) minimizedPanels.add(sessionId);
+          else minimizedPanels.delete(sessionId);
+          tui.requestRender();
+        });
+        return panel;
+      });
       footer.install(ctx, next);
     }
   };
@@ -337,6 +366,11 @@ export default function subagentExtension(pi: ExtensionAPI): void {
               () => sessionRuntimes.get(sessionId) === owner,
             );
             return launch;
+          },
+          cancelBackgroundBatch: (batchId) => {
+            const owner = runtime;
+            if (!owner) throw new Error("Subagent runtime is not available for this session.");
+            return owner.cancelRootBatch(batchId);
           },
         },
       ),
@@ -421,12 +455,32 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     if (config) await activate(ctx, config, activeMode);
   });
 
+  pi.registerShortcut("alt+m", {
+    description: "Minimize or expand the agents panel",
+    handler: (ctx) => {
+      const sessionId = ctx.sessionManager.getSessionId();
+      const set = panelMinimizeSetters.get(sessionId);
+      if (!set) {
+        ctx.ui.notify("The agents panel is only available in TUI mode.", "warning");
+        return;
+      }
+      set(!minimizedPanels.has(sessionId));
+      ctx.ui.notify(minimizedPanels.has(sessionId) ? "Agents panel minimized" : "Agents panel expanded", "info");
+    },
+  });
+
   pi.registerCommand("agents", {
     description: "Inspect subagent runs or configure role models",
-    getArgumentCompletions: (prefix) =>
-      "configure".startsWith(prefix.trim().toLowerCase())
-        ? [{ value: "configure", label: "configure", description: "Choose models for subagent roles" }]
-        : null,
+    getArgumentCompletions: (prefix) => {
+      const normalized = prefix.trim().toLowerCase();
+      const options = [
+        { value: "configure", label: "configure", description: "Choose models for subagent roles" },
+        { value: "minimize", label: "minimize", description: "Collapse the agents panel to one summary line" },
+        { value: "expand", label: "expand", description: "Restore the full agents panel" },
+      ];
+      const matches = options.filter((option) => option.value.startsWith(normalized));
+      return matches.length ? matches : null;
+    },
     handler: async (args, ctx) => {
       const active = runtime;
       if (!active) {
@@ -434,6 +488,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         return;
       }
       const command = args.trim().toLowerCase();
+      if (command === "minimize" || command === "expand") {
+        setAgentsPanelMinimized(ctx, command === "minimize");
+        return;
+      }
       if (command === "configure") {
         if (ctx.mode !== "tui") {
           ctx.ui.notify("The agents model picker requires TUI mode.", "warning");
@@ -476,7 +534,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         return;
       }
       if (command) {
-        ctx.ui.notify("Usage: /agents [configure]", "warning");
+        ctx.ui.notify("Usage: /agents [configure|minimize|expand]", "warning");
         return;
       }
       if (ctx.mode !== "tui") {
@@ -609,6 +667,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     sessionRuntimes.delete(sessionId);
     sessionSenders.delete(sessionId);
     backgroundRunSenders.delete(sessionId);
+    panelMinimizeSetters.delete(sessionId);
+    minimizedPanels.delete(sessionId);
     for (let index = bufferedFollowUps.length - 1; index >= 0; index -= 1) {
       if (bufferedFollowUps[index]!.sessionId === sessionId) bufferedFollowUps.splice(index, 1);
     }

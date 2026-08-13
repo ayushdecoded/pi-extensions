@@ -11,7 +11,7 @@ import {
   toolsForRole,
   usageWithPendingAssistant,
 } from "../src/runtime/runtime.ts";
-import { costColor, invocationDuration, renderPanel } from "../src/ui/panel.ts";
+import { AgentsPanel, costColor, invocationDuration, renderPanel } from "../src/ui/panel.ts";
 import { projectBatches } from "../src/ui/projection.ts";
 import { roleColor, stripLeadingRoleNames } from "../src/ui/roles.ts";
 
@@ -195,6 +195,68 @@ test("root batches can return a launch handle before detached completion", async
   const result = await launch.completion;
   assert.equal(result.batchId, launch.batchId);
   assert.deepEqual(result.allRuns, []);
+});
+
+test("cancelRootBatch aborts a detached batch and settles it as cancelled", async () => {
+  const runtime = validationRuntime([]);
+  const pending: Array<{ resolve: (value: any) => void }> = [];
+  (runtime as any).runInvocation = (_request: unknown, _context: unknown, _requestIndex: number, signal?: AbortSignal) =>
+    new Promise((resolve) => {
+      const index = pending.length;
+      pending.push({ resolve });
+      signal?.addEventListener("abort", () => resolve({
+        invocationId: `inv-${index + 1}`,
+        agent: `atlas-${index + 1}`,
+        role: "Atlas",
+        status: "cancelled",
+        durationMs: 1,
+        error: "Background batch cancelled by the parent session.",
+        usage: { ...ZERO_USAGE },
+      }));
+    });
+
+  const launch = runtime.startRootBatch([
+    { role: "Atlas", task: "First" },
+    { role: "Atlas", task: "Second" },
+  ]);
+  assert.equal(pending.length, 2, "both invocations started with the batch signal");
+  assert.equal(runtime.cancelRootBatch("unknown-batch"), false, "unknown ids are not cancellable");
+
+  assert.equal(runtime.cancelRootBatch(launch.batchId), true);
+  const result = await launch.completion;
+  assert.equal(result.runs.length, 2);
+  assert.ok(result.runs.every((run) => run.status === "cancelled"), "all agents report cancelled");
+  assert.equal(runtime.cancelRootBatch(launch.batchId), false, "settled batches drop out of the cancel map");
+});
+
+test("cancelRootBatch is idempotent and a second cancel returns false", async () => {
+  const runtime = validationRuntime([]);
+  (runtime as any).runInvocation = (_request: unknown, _context: unknown, _requestIndex: number, signal?: AbortSignal) =>
+    new Promise((resolve) => {
+      signal?.addEventListener("abort", () => resolve({
+        invocationId: "inv", agent: "atlas-1", role: "Atlas", status: "cancelled",
+        durationMs: 1, usage: { ...ZERO_USAGE },
+      }));
+    });
+
+  const launch = runtime.startRootBatch([{ role: "Atlas", task: "Only" }]);
+  assert.equal(runtime.cancelRootBatch(launch.batchId), true);
+  assert.equal(runtime.cancelRootBatch(launch.batchId), false, "already-aborted batches are not re-aborted");
+  const result = await launch.completion;
+  assert.equal(result.runs[0]!.status, "cancelled");
+});
+
+test("a caller signal still cancels synchronous root batches through the batch controller", async () => {
+  const runtime = validationRuntime([]);
+  (runtime as any).runInvocation = (_request: unknown, _context: unknown, _requestIndex: number, signal?: AbortSignal) =>
+    new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(signal.reason));
+    });
+  const controller = new AbortController();
+  const pending = runtime.runRootBatch([{ role: "Atlas", task: "Sync" }], controller.signal);
+  controller.abort(new Error("parent turn stopped"));
+  const result = await pending;
+  assert.equal(result.runs[0]!.status, "failed");
 });
 
 test("batches await every request and aggregate unexpected invocation rejections as failures", async () => {
@@ -533,6 +595,52 @@ test("compact panel shows only the latest batch, then expires to the dashboard h
   const expired = renderPanel(runtime, theme, 120, 50_000).join("\n");
   assert.doesNotMatch(expired, /Worker×1|Atlas×1|Agents ✓/);
   assert.equal(expired, "See all agent batches in /agents");
+});
+
+test("minimized panel collapses to one summary line and hides once the batch settles", () => {
+  const state = emptyRuntimeState();
+  applyEvent(state, { type: "batch.started", batch: { id: "batch", createdAt: 1 } });
+  applyEvent(state, { type: "invocation.queued", invocation: invocation({ id: "one", batchId: "batch", agent: "atlas-1", role: "Atlas", status: "running", startedAt: 1 }) });
+  applyEvent(state, { type: "invocation.queued", invocation: invocation({ id: "two", batchId: "batch", agent: "vigil-1", role: "Vigil", status: "queued", queuedAt: 2 }) });
+  const runtime = { state, activities: new Map() } as unknown as SubagentRuntime;
+  const theme = { fg: (_color: string, text: string) => text } as unknown as Parameters<typeof renderPanel>[1];
+
+  const expanded = renderPanel(runtime, theme, 120, 10_000, false);
+  assert.ok(expanded.length > 1, "expanded panel lists every agent");
+  assert.match(expanded.join("\n"), /Atlas.*running|Vigil.*queued/);
+
+  const minimized = renderPanel(runtime, theme, 120, 10_000, true);
+  assert.equal(minimized.length, 1, "minimized panel is exactly one summary line");
+  assert.match(minimized[0]!, /Agents.*2 agents/);
+  assert.doesNotMatch(minimized.join("\n"), /atlas-1|vigil-1|See all agent batches/);
+});
+
+test("minimized panel is hidden entirely when the latest batch is settled", () => {
+  const state = emptyRuntimeState();
+  applyEvent(state, { type: "batch.started", batch: { id: "batch", createdAt: 1 } });
+  applyEvent(state, { type: "invocation.queued", invocation: invocation({ id: "one", batchId: "batch", agent: "atlas-1", role: "Atlas", status: "complete", startedAt: 1, finishedAt: 2_000 }) });
+  const runtime = { state, activities: new Map() } as unknown as SubagentRuntime;
+  const theme = { fg: (_color: string, text: string) => text } as unknown as Parameters<typeof renderPanel>[1];
+
+  const minimized = renderPanel(runtime, theme, 120, 50_000, true);
+  assert.deepEqual(minimized, [], "settled batches leave the minimized panel empty");
+  const expanded = renderPanel(runtime, theme, 120, 50_000, false);
+  assert.match(expanded.join("\n"), /See all agent batches in \/agents/);
+});
+
+test("AgentsPanel respects the minimized getter", () => {
+  const state = emptyRuntimeState();
+  applyEvent(state, { type: "batch.started", batch: { id: "batch", createdAt: 1 } });
+  applyEvent(state, { type: "invocation.queued", invocation: invocation({ id: "one", batchId: "batch", agent: "atlas-1", role: "Atlas", status: "running", startedAt: 1 }) });
+  const runtime = { state, activities: new Map(), subscribe: () => () => {} } as unknown as SubagentRuntime;
+  const theme = { fg: (_color: string, text: string) => text } as unknown as Parameters<typeof renderPanel>[1];
+  const tui = { requestRender: () => {} } as any;
+  let minimized = false;
+  const panel = new AgentsPanel(runtime, tui, theme, () => minimized);
+  assert.ok(panel.render(120).length > 1, "expanded by default");
+  minimized = true;
+  assert.equal(panel.render(120).length, 1);
+  panel.dispose();
 });
 
 test("role, cost, and invocation duration helpers follow UI thresholds", () => {

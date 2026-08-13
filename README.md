@@ -128,6 +128,14 @@ subagent({
 
 After every requested agent has settled—including failures, timeouts, and cancellations—the extension delivers one aggregated follow-up to the main session and triggers a turn when idle. A compact transcript card marks the result (`⟳ Background subagents · settled`) with one colored line per agent; expand it to read the full outputs the model received. Nested child-agent tools do not expose `background`; their delegations remain synchronous, including when the root batch itself is running in the background.
 
+The main agent can stop a detached batch with its receipt id — every agent in the batch aborts and the final (cancelled) result is still delivered as a follow-up:
+
+```ts
+subagent({ background: { action: "cancel", batchId: "<batchId from the receipt>" } });
+```
+
+An unknown or already-settled id returns a `not found` notice instead of an error.
+
 Detached batches survive `/reload`: the reload keeps the process alive and re-invokes this extension, so the runtime hands its running child sessions off to the reloaded instance instead of aborting them. The agents keep working, their state stays visible in `/agents`, and the aggregated result is still delivered as a follow-up through the live session API. Branch navigation (e.g. `/back`, `/fork` moves within the session tree), quitting, or switching to another session still aborts running agents.
 
 ## Session transfer and prompt commands
@@ -173,7 +181,7 @@ The `web_search` tool searches DuckDuckGo Lite and reads URLs without a browser 
 - The pack binds `Alt+.` / `Alt+,` to increase/decrease thinking. Host keybindings use `Alt+M` to rotate forward through scoped models.
 - Pi's native working row shows a playful, once-per-second user-perceived timer for the active prompt. Completed prompts lasting at least one minute leave a responsive, duration-themed divider in the transcript without entering LLM context; queued prompts retain their original submission time.
 - Active tool-loop tasks compact at 85% context only at a completed turn boundary, then receive a hidden continuation message after compaction. Native threshold compaction below 85% is deferred per model window; manual and overflow compaction remain untouched.
-- The above-editor widget shows only the newest batch; all earlier batches collapse into one `/agents` history link. Agent rows show role, status, elapsed time, tokens, cost, and current activity without exposing invocation prompts, handles, or invocation numbers.
+- The above-editor widget shows only the newest batch; all earlier batches collapse into one `/agents` history link. Agent rows show role, status, elapsed time, tokens, cost, and current activity without exposing invocation prompts, handles, or invocation numbers. With many concurrent agents the widget can grow tall: `/agents minimize` or `Alt+M` collapses it to a single summary line (the state survives `/reload`), and `/agents expand` or `Alt+M` restores the full rows.
 - Nested agents render as a spaced, responsive tree. Atlas, Forge, and Vigil have consistent role colors; costs use green below $2, yellow below $7, and red from $7.
 - Follow-ups retain the same handle and display `↻` with their invocation number. Subagent tool calls show a prompt-free request roster, and results always show prompt-free per-invocation duration, token, and cost metrics.
 - `/agents` opens aligned batch history and nested agent trees plus a fullscreen read-only transcript viewer using Pi-native user, assistant, markdown, and thinking presentation.

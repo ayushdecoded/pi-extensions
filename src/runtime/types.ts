@@ -118,12 +118,16 @@ export type BackgroundBatchLaunch = {
   completion: Promise<BatchResult>;
 };
 
-export type BackgroundBatchReceipt = {
-  background: true;
+/** Manage an existing background batch through the tool's `background` parameter. */
+export type BackgroundBatchManage = {
+  action: "cancel";
   batchId: string;
-  status: "started";
-  agentCount: number;
 };
+
+export type BackgroundBatchReceipt =
+  | { background: true; batchId: string; status: "started"; agentCount: number }
+  | { background: true; batchId: string; status: "cancelled" }
+  | { background: true; batchId: string; status: "not-found" };
 
 export type SubagentToolResult = BatchResult | BackgroundBatchReceipt;
 

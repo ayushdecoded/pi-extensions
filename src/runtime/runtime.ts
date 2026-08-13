@@ -80,6 +80,8 @@ export class SubagentRuntime {
   private readonly transcriptRevisions = new Map<string, number>();
   private readonly reservedHandles: Set<string>;
   private readonly invocationCancels = new Set<(reason?: unknown) => void>();
+  /** Abort controller per detached (background) root batch, keyed by batchId. */
+  private readonly batchCancels = new Map<string, AbortController>();
   private readonly pendingInvocations = new Set<Promise<InvocationResult>>();
   private readonly headingControllers = new Set<AbortController>();
   private modelRuntime?: ModelRuntime;
@@ -192,6 +194,11 @@ export class SubagentRuntime {
     return this.transcriptRevisions.get(handle) ?? 0;
   }
 
+  /**
+   * Detach a root batch. The batch gets its own abort controller so it can be
+   * stopped later by id through {@link cancelRootBatch} (background delegation)
+   * while still honouring a caller-supplied signal (synchronous delegation).
+   */
   startRootBatch(
     requests: SubagentRequest[],
     signal?: AbortSignal,
@@ -205,7 +212,13 @@ export class SubagentRuntime {
     this.record({ type: "delegation.started", call: { id: callId, batchId, createdAt } });
     const progress = () => onProgress?.(this.snapshotBatch(batchId, undefined, createdAt));
     const unsubscribe = onProgress ? this.subscribe(progress) : undefined;
-    const completion = this.runBatch(requests, { batchId, callId, depth: 0 }, signal)
+    const controller = new AbortController();
+    this.batchCancels.set(batchId, controller);
+    if (signal) {
+      if (signal.aborted) controller.abort(signal.reason);
+      else signal.addEventListener("abort", () => controller.abort(signal.reason), { once: true });
+    }
+    const completion = this.runBatch(requests, { batchId, callId, depth: 0 }, controller.signal)
       .then((result) => {
         const persisted = this.resultsForBatch(batchId);
         const persistedIds = new Set(persisted.map((run) => run.invocationId));
@@ -215,8 +228,25 @@ export class SubagentRuntime {
           durationMs: Date.now() - createdAt,
         };
       })
-      .finally(() => unsubscribe?.());
+      .finally(() => {
+        unsubscribe?.();
+        this.batchCancels.delete(batchId);
+      });
     return { batchId, completion };
+  }
+
+  /**
+   * Abort a running root batch by id. Every invocation in the batch — including
+   * nested delegations, which abort through their live child sessions — settles
+   * as cancelled and the detached completion resolves so the background
+   * follow-up still reports. Returns false when no live batch has this id
+   * (unknown or already settled).
+   */
+  cancelRootBatch(batchId: string): boolean {
+    const controller = this.batchCancels.get(batchId);
+    if (!controller || controller.signal.aborted) return false;
+    controller.abort(new Error(`Background batch ${batchId} cancelled by the parent session.`));
+    return true;
   }
 
   async runRootBatch(requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void): Promise<BatchResult> {
@@ -619,6 +649,8 @@ export class SubagentRuntime {
     for (const controller of this.headingControllers) controller.abort(reason);
     this.headingControllers.clear();
     for (const cancel of [...this.invocationCancels]) cancel(reason);
+    for (const controller of this.batchCancels.values()) controller.abort(reason);
+    this.batchCancels.clear();
     await Promise.allSettled([...this.liveSessions.values()].map((session) => session.abort()));
     await Promise.allSettled([...this.pendingInvocations]);
     for (const session of this.liveSessions.values()) session.dispose();

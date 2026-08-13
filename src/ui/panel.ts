@@ -10,11 +10,20 @@ import { roleText, stripLeadingRoleNames } from "./roles.ts";
 export class AgentsPanel implements Component {
   private readonly unsubscribe: () => void;
   private timer?: NodeJS.Timeout;
-  constructor(private readonly runtime: SubagentRuntime, private readonly tui: TUI, private readonly theme: Theme) {
+  constructor(
+    private readonly runtime: SubagentRuntime,
+    private readonly tui: TUI,
+    private readonly theme: Theme,
+    private readonly isMinimized: () => boolean = () => false,
+  ) {
     this.unsubscribe = runtime.subscribe(() => tui.requestRender());
     this.syncTimer();
   }
-  render(width: number): string[] { const now = Date.now(); this.syncTimer(now); return renderPanel(this.runtime, this.theme, width, now); }
+  render(width: number): string[] {
+    const now = Date.now();
+    this.syncTimer(now);
+    return renderPanel(this.runtime, this.theme, width, now, this.isMinimized());
+  }
   invalidate(): void {}
   dispose(): void { this.unsubscribe(); if (this.timer) clearInterval(this.timer); }
   private syncTimer(now = Date.now()): void {
@@ -25,12 +34,13 @@ export class AgentsPanel implements Component {
   }
 }
 
-export function renderPanel(runtime: SubagentRuntime, theme: Theme, width: number, now: number): string[] {
+export function renderPanel(runtime: SubagentRuntime, theme: Theme, width: number, now: number, minimized = false): string[] {
   const batches = projectBatches(runtime.state);
   if (!batches.length) return [];
   const [latest] = batches;
   if (!latest) return [];
   const showLatest = latest.active || now - (latest.finishedAt ?? latest.startedAt) < 45_000;
+  if (minimized) return showLatest ? renderBatchSummary(latest, theme, now, width) : [];
   const lines = showLatest ? renderBatchSummary(latest, theme, now, width) : [];
   if (latest.active) {
     latest.roots.forEach((root, index) => renderNode(lines, root, runtime, theme, width, now, "", index === latest.roots.length - 1));

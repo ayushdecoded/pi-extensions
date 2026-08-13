@@ -57,6 +57,91 @@ test("only root tools expose background batches", () => {
   assert.doesNotMatch(JSON.stringify(nested.parameters), /background/i);
 });
 
+test("root tools expose the background manage action while nested tools do not", () => {
+  const completion = Promise.resolve({ batchId: "batch", runs: [], allRuns: [], durationMs: 0 });
+  const root = createSubagentTool(
+    config,
+    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
+    {
+      startBackgroundBatch: () => ({ batchId: "bg", completion }),
+      cancelBackgroundBatch: () => true,
+    },
+  );
+  const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 }));
+
+  assert.match(JSON.stringify(root.parameters), /"const":"cancel".*[Bb]atch id from the launch receipt/);
+  assert.match(root.description, /background: \{action: \"cancel\", batchId\}/);
+  assert.doesNotMatch(JSON.stringify(nested.parameters), /background|cancel/i);
+  assert.doesNotMatch(nested.description, /cancel/i);
+});
+
+test("cancelling a live background batch reports cancelled without touching agents", async () => {
+  let cancelled: string | undefined;
+  let backgroundRequests: unknown;
+  const tool = createSubagentTool(
+    config,
+    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
+    {
+      startBackgroundBatch: (requests) => {
+        backgroundRequests = requests;
+        return { batchId: "bg-1", completion: Promise.resolve({ batchId: "bg-1", runs: [], allRuns: [], durationMs: 0 }) };
+      },
+      cancelBackgroundBatch: (batchId) => {
+        cancelled = batchId;
+        return true;
+      },
+    },
+  ) as any;
+
+  const result = await tool.execute("call", { background: { action: "cancel", batchId: "bg-1" } }, undefined);
+  assert.equal(cancelled, "bg-1");
+  assert.equal(backgroundRequests, undefined, "cancelling never launches a batch");
+  assert.deepEqual(result.details, { background: true, batchId: "bg-1", status: "cancelled" });
+  assert.match(result.content[0].text, /bg-1 · cancelled/);
+  assert.match(result.content[0].text, /final result is delivered as a follow-up/);
+});
+
+test("cancelling an unknown or already-settled batch reports not found", async () => {
+  let cancelled = false;
+  const tool = createSubagentTool(
+    config,
+    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
+    {
+      startBackgroundBatch: () => ({ batchId: "bg", completion: Promise.resolve({ batchId: "bg", runs: [], allRuns: [], durationMs: 0 }) }),
+      cancelBackgroundBatch: () => {
+        cancelled = true;
+        return false;
+      },
+    },
+  ) as any;
+
+  const result = await tool.execute("call", { background: { action: "cancel", batchId: "stale" } }, undefined);
+  assert.equal(cancelled, true, "the runtime is still asked to cancel stale ids");
+  assert.deepEqual(result.details, { background: true, batchId: "stale", status: "not-found" });
+  assert.match(result.content[0].text, /stale · not found/);
+});
+
+test("cancelling rejects mixed agents and nested management is unavailable", async () => {
+  const tool = createSubagentTool(
+    config,
+    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
+    {
+      startBackgroundBatch: () => ({ batchId: "bg", completion: Promise.resolve({ batchId: "bg", runs: [], allRuns: [], durationMs: 0 }) }),
+      cancelBackgroundBatch: () => true,
+    },
+  ) as any;
+  await assert.rejects(
+    tool.execute("call", { background: { action: "cancel", batchId: "bg" }, agents: [{ role: "Scout", task: "no" }] }, undefined),
+    /either agents or a background action, not both/,
+  );
+
+  const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 })) as any;
+  await assert.rejects(
+    nested.execute("call", { background: { action: "cancel", batchId: "bg" } }, undefined),
+    /only in the root session/,
+  );
+});
+
 test("root delegations default to background and background: false waits inline", async () => {
   let resolveCompletion!: (value: any) => void;
   const completion = new Promise<any>((resolve) => { resolveCompletion = resolve; });
