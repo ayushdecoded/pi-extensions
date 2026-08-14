@@ -6,12 +6,10 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 export function registerThinkingShortcuts(pi: ExtensionAPI): void {
   const change = (direction: 1 | -1, ctx: ExtensionContext): void => {
     const before = pi.getThinkingLevel();
-    const requested = stepThinkingLevel(before, direction);
-    pi.setThinkingLevel(requested);
-    const after = pi.getThinkingLevel();
+    const after = stepAvailableThinkingLevel(pi, before, direction);
     ctx.ui.notify(
-      after === before && requested !== before
-        ? `Thinking stayed ${after} (current model may clamp it)`
+      after === before
+        ? `Thinking stayed ${after} (model ${direction === 1 ? "maximum" : "minimum"})`
         : `Thinking: ${after}`,
       "info",
     );
@@ -35,7 +33,27 @@ export function registerThinkingShortcuts(pi: ExtensionAPI): void {
   });
 }
 
-export function stepThinkingLevel(current: ThinkingLevel, direction: 1 | -1): ThinkingLevel {
-  const index = Math.max(0, THINKING_LEVELS.indexOf(current));
-  return THINKING_LEVELS[Math.max(0, Math.min(THINKING_LEVELS.length - 1, index + direction))]!;
+/**
+ * Step to the next thinking level the current model actually supports, probing
+ * through the global ladder in the given direction. The SDK clamps unsupported
+ * levels back to the current one without persisting anything, so each probe is
+ * a no-op until it hits an available level — the first probe that changes the
+ * effective level lands exactly on the model's next supported level.
+ */
+export function stepAvailableThinkingLevel(
+  pi: ExtensionAPI,
+  current: ThinkingLevel,
+  direction: 1 | -1,
+): ThinkingLevel {
+  const currentIndex = Math.max(0, THINKING_LEVELS.indexOf(current));
+  const candidates =
+    direction === 1
+      ? THINKING_LEVELS.slice(currentIndex + 1)
+      : THINKING_LEVELS.slice(0, currentIndex).reverse();
+  for (const candidate of candidates) {
+    pi.setThinkingLevel(candidate);
+    const after = pi.getThinkingLevel();
+    if (after !== current) return after;
+  }
+  return current;
 }
