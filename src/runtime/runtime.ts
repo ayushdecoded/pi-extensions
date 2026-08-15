@@ -79,6 +79,7 @@ export class SubagentRuntime {
   private readonly transcriptListeners = new Set<(handle: string, revision: number) => void>();
   private readonly transcriptRevisions = new Map<string, number>();
   private readonly reservedHandles: Set<string>;
+  private batchCounter: number;
   private readonly invocationCancels = new Set<(reason?: unknown) => void>();
   /** Abort controller per detached (background) root batch, keyed by batchId. */
   private readonly batchCancels = new Map<string, AbortController>();
@@ -96,6 +97,7 @@ export class SubagentRuntime {
     this.scheduler = new CapacityScheduler(options.config.defaults.concurrency);
     this.state = initialState ?? emptyRuntimeState();
     this.reservedHandles = new Set(options.reservedHandles ?? this.state.agents.keys());
+    this.batchCounter = maxBatchCounter(this.state);
     this.activeModeValue = options.activeMode ?? defaultModeName(options.config);
     this.effectiveRoles = this.resolveRoles(this.activeModeValue);
   }
@@ -207,7 +209,7 @@ export class SubagentRuntime {
     onProgress?: (result: BatchResult) => void,
   ): BackgroundBatchLaunch {
     this.validateBatch(requests);
-    const batchId = this.nextBatchId(requests);
+    const batchId = this.nextBatchId();
     const createdAt = Date.now();
     this.record({ type: "batch.started", batch: { id: batchId, createdAt } });
     const callId = randomUUID();
@@ -267,8 +269,7 @@ export class SubagentRuntime {
    * Stop a root background batch by its receipt batchId, or a single live
    * agent by its handle. Returns the scope that was stopped, or undefined
    * when the target matched nothing live. Handles and batch ids cannot
-   * collide: handles are slug-number, batch ids always carry a letter in
-   * their suffix (and a `+` when the batch spans roles).
+   * collide: handles are slug-number (`vigil-1`), batch ids are `batch-N`.
    */
   cancelRootTarget(target: string): "batch" | "agent" | undefined {
     if (this.cancelAgent(target)) return "agent";
@@ -277,22 +278,16 @@ export class SubagentRuntime {
   }
 
   /**
-   * Readable role-tagged root batch id: deduped role slugs joined with `+`
-   * plus a short letter-prefixed suffix, e.g. `vigil+forge-a1b2`. The suffix
-   * always starts with a letter so the id can never be mistaken for an agent
-   * handle (`vigil-1`); uniqueness is checked against restored state too.
+   * Session-scoped sequential root batch id (`batch-1`, `batch-2`, ...).
+   * The counter resumes past ids restored from persisted state, and the
+   * uniqueness loop guards the rare case of a fresh runtime adopting state
+   * whose batches were recorded out of order.
    */
-  private nextBatchId(requests: SubagentRequest[]): string {
-    const slugs: string[] = [];
-    for (const request of requests) {
-      const role = "role" in request ? request.role : this.state.agents.get(request.agent)?.role ?? request.agent;
-      const slug = roleSlug(role);
-      if (slug && !slugs.includes(slug)) slugs.push(slug);
-    }
-    const stem = slugs.length > 0 ? slugs.join("+") : "batch";
+  private nextBatchId(): string {
     let batchId: string;
     do {
-      batchId = `${stem}-${batchIdSuffix()}`;
+      this.batchCounter += 1;
+      batchId = `batch-${this.batchCounter}`;
     } while (this.state.batches.has(batchId) || this.batchCancels.has(batchId));
     return batchId;
   }
@@ -1011,14 +1006,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** Lowercase dash-slug for a role name, mirroring agent handle allocation. */
-function roleSlug(role: string): string | undefined {
-  const slug = role.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  return slug || undefined;
-}
-
-/** Short unique-ish suffix that always starts with a letter, e.g. `a1b2`. */
-function batchIdSuffix(): string {
-  const letter = "abcdefghijklmnopqrstuvwxyz";
-  return letter[Math.floor(Math.random() * letter.length)] + Math.random().toString(36).slice(2, 5);
+/** Highest `batch-N` id restored from persisted state, so counters resume. */
+function maxBatchCounter(state: RuntimeState): number {
+  let max = 0;
+  for (const id of state.batches.keys()) {
+    const match = /^batch-(\d+)$/.exec(id);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return max;
 }
