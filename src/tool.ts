@@ -17,7 +17,7 @@ const BASE_TOOL_DESCRIPTION =
 
 /** Root delegations detach by default: continue working, results arrive as one follow-up. */
 const ROOT_DELIVERY_GUIDANCE =
-  " Prefer background delegation: the call returns a receipt immediately and one aggregated follow-up arrives after every agent settles, so continue other work without polling. Pass background: false only when this turn must block on the results before doing anything else. To stop a background batch, pass background: {action: \"cancel\", batchId} with the receipt's batchId and omit agents; every agent aborts and one final result is delivered.";
+  " Prefer background delegation: the call returns a receipt immediately and one aggregated follow-up arrives after every agent settles, so continue other work without polling. Pass background: false only when this turn must block on the results before doing anything else. To stop work early, pass background: {action: \"cancel\", batchId} with the receipt's batchId (stops the whole batch) or an agent handle such as forge-3 (stops just that agent) and omit agents; a final result is still delivered.";
 
 /** Child delegations stay synchronous; the root session owns the background capability. */
 const NESTED_DELIVERY_GUIDANCE =
@@ -25,14 +25,14 @@ const NESTED_DELIVERY_GUIDANCE =
 
 export type SubagentExecutor = (requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void) => Promise<BatchResult>;
 export type BackgroundSubagentExecutor = (requests: SubagentRequest[]) => BackgroundBatchLaunch;
-/** Returns true when a live background batch with that id was aborted. */
-export type CancelBackgroundBatch = (batchId: string) => boolean;
+/** Stops a live root batch (batch id) or a single child agent (handle); returns the stopped scope, or undefined when nothing live matched. */
+export type CancelBackgroundTarget = (target: string) => "batch" | "agent" | undefined;
 
 export type SubagentToolOptions = {
   /** Root tools may detach a batch. Nested tools intentionally omit this capability. */
   startBackgroundBatch?: BackgroundSubagentExecutor;
-  /** Root tools may stop a detached batch by its receipt batchId. */
-  cancelBackgroundBatch?: CancelBackgroundBatch;
+  /** Root tools may stop a detached batch by its receipt batchId, or one agent by its handle. */
+  cancelBackgroundTarget?: CancelBackgroundTarget;
 };
 
 export function createSubagentTool(
@@ -89,19 +89,19 @@ export function createSubagentTool(
   });
   const backgroundManage = Type.Object(
     {
-      action: Type.Literal("cancel", { description: "Stop the batch: every agent aborts and one final result is delivered as a follow-up." }),
-      batchId: Type.String({ minLength: 1, description: "Batch id from the launch receipt." }),
+      action: Type.Literal("cancel", { description: "Stop the batch, or only the agent named by batchId; a final result is delivered as a follow-up." }),
+      batchId: Type.String({ minLength: 1, description: "Batch id from the launch receipt, or an agent handle (e.g. forge-3) to stop a single agent in a running batch." }),
     },
-    { additionalProperties: false, description: "Manage an existing background batch instead of launching one; omit agents." },
+    { additionalProperties: false, description: "Stop a running background batch (by its receipt batch id) or a single agent in one (by its handle) instead of launching new work; omit agents." },
   );
-  const backgroundParam = options.cancelBackgroundBatch
+  const backgroundParam = options.cancelBackgroundTarget
     ? Type.Optional(Type.Union([backgroundBoolean, backgroundManage], {
-        description: "Background execution: true detaches, false waits inline, {action, batchId} manages a running batch.",
+        description: "Background execution: true detaches, false waits inline, {action, batchId} stops a running batch or a single agent.",
       }))
     : Type.Optional(backgroundBoolean);
   const parameters = Type.Object(
     {
-      ...(options.cancelBackgroundBatch ? { agents: Type.Optional(agentsSchema) } : { agents: agentsSchema }),
+      ...(options.cancelBackgroundTarget ? { agents: Type.Optional(agentsSchema) } : { agents: agentsSchema }),
       ...(options.startBackgroundBatch ? { background: backgroundParam } : {}),
     },
     { additionalProperties: false },
@@ -143,16 +143,15 @@ export function createSubagentTool(
       const { agents = [] } = params as { agents?: SubagentRequest[] };
       const background = (params as { background?: boolean | BackgroundBatchManage }).background;
       if (background !== undefined && typeof background === "object") {
-        if (!options.cancelBackgroundBatch) {
+        if (!options.cancelBackgroundTarget) {
           throw new Error("Background batch management is available only in the root session.");
         }
         if (agents.length > 0) throw new Error("Pass either agents or a background action, not both.");
-        const cancelled = options.cancelBackgroundBatch(background.batchId);
-        const receipt: Extract<BackgroundBatchReceipt, { status: "cancelled" | "not-found" }> = {
-          background: true,
-          batchId: background.batchId,
-          status: cancelled ? "cancelled" : "not-found",
-        };
+        const scope = options.cancelBackgroundTarget(background.batchId);
+        const receipt: Extract<BackgroundBatchReceipt, { status: "cancelled" | "not-found" }> =
+          scope === undefined
+            ? { background: true, batchId: background.batchId, status: "not-found" }
+            : { background: true, batchId: background.batchId, status: "cancelled", scope };
         return {
           content: [{ type: "text", text: formatCancelReceipt(receipt) }],
           details: receipt,
@@ -202,9 +201,12 @@ export function formatBackgroundReceipt(receipt: Extract<BackgroundBatchReceipt,
 
 export function formatCancelReceipt(receipt: Extract<BackgroundBatchReceipt, { status: "cancelled" | "not-found" }>): string {
   if (receipt.status === "cancelled") {
-    return `[Background subagents · ${receipt.batchId} · cancelled]\nBatch stopped; its agents were aborted and the final result is delivered as a follow-up.`;
+    const stopped = receipt.scope === "agent"
+      ? `Agent ${receipt.batchId} was stopped; the rest of its batch keeps running.`
+      : `Batch ${receipt.batchId} was stopped; every agent aborted.`;
+    return `[Background subagents · ${receipt.batchId} · cancelled]\n${stopped} A final result is delivered as a follow-up when the batch settles.`;
   }
-  return `[Background subagents · ${receipt.batchId} · not found]\nNo running batch with this id; it may have already settled. See the delivered results.`;
+  return `[Background subagents · ${receipt.batchId} · not found]\nNo running batch with this id, or no live agent with this handle; it may have already settled. See the delivered results.`;
 }
 
 export function formatBatchForModel(result: BatchResult): string {

@@ -64,12 +64,12 @@ test("root tools expose the background manage action while nested tools do not",
     async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
     {
       startBackgroundBatch: () => ({ batchId: "bg", completion }),
-      cancelBackgroundBatch: () => true,
+      cancelBackgroundTarget: () => "batch",
     },
   );
   const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 }));
 
-  assert.match(JSON.stringify(root.parameters), /"const":"cancel".*[Bb]atch id from the launch receipt/);
+  assert.match(JSON.stringify(root.parameters), /"const":"cancel".*[Bb]atch id from the launch receipt, or an agent handle/);
   assert.match(root.description, /background: \{action: \"cancel\", batchId\}/);
   assert.doesNotMatch(JSON.stringify(nested.parameters), /background|cancel/i);
   assert.doesNotMatch(nested.description, /cancel/i);
@@ -86,9 +86,9 @@ test("cancelling a live background batch reports cancelled without touching agen
         backgroundRequests = requests;
         return { batchId: "bg-1", completion: Promise.resolve({ batchId: "bg-1", runs: [], allRuns: [], durationMs: 0 }) };
       },
-      cancelBackgroundBatch: (batchId) => {
+      cancelBackgroundTarget: (batchId) => {
         cancelled = batchId;
-        return true;
+        return "batch";
       },
     },
   ) as any;
@@ -96,9 +96,30 @@ test("cancelling a live background batch reports cancelled without touching agen
   const result = await tool.execute("call", { background: { action: "cancel", batchId: "bg-1" } }, undefined);
   assert.equal(cancelled, "bg-1");
   assert.equal(backgroundRequests, undefined, "cancelling never launches a batch");
-  assert.deepEqual(result.details, { background: true, batchId: "bg-1", status: "cancelled" });
+  assert.deepEqual(result.details, { background: true, batchId: "bg-1", status: "cancelled", scope: "batch" });
   assert.match(result.content[0].text, /bg-1 · cancelled/);
   assert.match(result.content[0].text, /final result is delivered as a follow-up/);
+});
+
+test("cancelling a single agent by handle reports agent scope without touching the batch", async () => {
+  let cancelled: string | undefined;
+  const tool = createSubagentTool(
+    config,
+    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
+    {
+      startBackgroundBatch: () => ({ batchId: "bg-1", completion: Promise.resolve({ batchId: "bg-1", runs: [], allRuns: [], durationMs: 0 }) }),
+      cancelBackgroundTarget: (target) => {
+        cancelled = target;
+        return target === "vigil-1" ? "agent" : undefined;
+      },
+    },
+  ) as any;
+
+  const result = await tool.execute("call", { background: { action: "cancel", batchId: "vigil-1" } }, undefined);
+  assert.equal(cancelled, "vigil-1");
+  assert.deepEqual(result.details, { background: true, batchId: "vigil-1", status: "cancelled", scope: "agent" });
+  assert.match(result.content[0].text, /vigil-1 · cancelled/);
+  assert.match(result.content[0].text, /rest of its batch keeps running/);
 });
 
 test("cancelling an unknown or already-settled batch reports not found", async () => {
@@ -108,9 +129,9 @@ test("cancelling an unknown or already-settled batch reports not found", async (
     async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
     {
       startBackgroundBatch: () => ({ batchId: "bg", completion: Promise.resolve({ batchId: "bg", runs: [], allRuns: [], durationMs: 0 }) }),
-      cancelBackgroundBatch: () => {
+      cancelBackgroundTarget: () => {
         cancelled = true;
-        return false;
+        return undefined;
       },
     },
   ) as any;
@@ -127,7 +148,7 @@ test("cancelling rejects mixed agents and nested management is unavailable", asy
     async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
     {
       startBackgroundBatch: () => ({ batchId: "bg", completion: Promise.resolve({ batchId: "bg", runs: [], allRuns: [], durationMs: 0 }) }),
-      cancelBackgroundBatch: () => true,
+      cancelBackgroundTarget: () => "batch",
     },
   ) as any;
   await assert.rejects(

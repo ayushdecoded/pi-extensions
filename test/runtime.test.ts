@@ -246,6 +246,96 @@ test("cancelRootBatch is idempotent and a second cancel returns false", async ()
   assert.equal(result.runs[0]!.status, "cancelled");
 });
 
+test("root batch ids are readable role-tagged slugs that never collide with handles", async () => {
+  const config = {
+    path: "/tmp/agents.yaml",
+    version: 1,
+    defaults: { maxDepth: 2, concurrency: 10, timeoutMinutes: 10 },
+    roles: [
+      {
+        name: "Atlas",
+        description: "Read-only explorer",
+        model: "openai-codex/gpt-5.6-luna",
+        thinking: "medium",
+        promptPath: "agents/atlas.md",
+        promptFile: "/tmp/atlas.md",
+        tools: ["read", "bash"],
+        delegates: [],
+        timeoutMinutes: 10,
+      },
+      {
+        name: "Vigil",
+        description: "Adversarial review",
+        model: "openai-codex/gpt-5.6-luna",
+        thinking: "medium",
+        promptPath: "agents/vigil.md",
+        promptFile: "/tmp/vigil.md",
+        tools: ["read"],
+        delegates: [],
+        timeoutMinutes: 10,
+      },
+    ],
+    presets: [],
+  } as AgentsConfig;
+  const runtime = new SubagentRuntime({
+    rootSessionId: "validation-root",
+    cwd: "/tmp",
+    config,
+    modelRegistry: {} as any,
+    appendEvent: () => {},
+  });
+  (runtime as any).runBatch = () => new Promise(() => {});
+
+  const first = runtime.startRootBatch([
+    { role: "Atlas", task: "one" },
+    { role: "Vigil", task: "two" },
+    { role: "Atlas", task: "three" },
+  ]);
+  runtime.state.agents.set("vigil-1", { handle: "vigil-1", role: "Vigil", sessionFile: "/tmp/vigil-1.md", createdAt: 1 });
+  const second = runtime.startRootBatch([{ agent: "vigil-1", task: "follow up" }]);
+  const third = runtime.startRootBatch([{ role: "Atlas", task: "four" }]);
+
+  assert.match(first.batchId, /^atlas\+vigil-[a-z][a-z0-9]{3}$/);
+  assert.match(second.batchId, /^vigil-[a-z][a-z0-9]{3}$/);
+  assert.match(third.batchId, /^atlas-[a-z][a-z0-9]{3}$/);
+  assert.notEqual(first.batchId, third.batchId, "launches get distinct suffixes");
+  assert.doesNotMatch(first.batchId, /^[a-z]+-\d+$/, "batch ids are never shaped like agent handles");
+
+  const batch = runtime.state.batches.get(first.batchId);
+  assert.equal(batch?.id, first.batchId);
+  assert.equal(typeof batch?.createdAt, "number");
+});
+
+test("cancelRootTarget stops one agent by handle or a whole batch by id", () => {
+  const runtime = validationRuntime([]);
+  const agent = new AbortController();
+  const batch = new AbortController();
+  (runtime as any).agentCancels.set("vigil-1", agent);
+  (runtime as any).batchCancels.set("vigil+forge-a1b2", batch);
+
+  assert.equal(runtime.cancelRootTarget("vigil-1"), "agent");
+  assert.equal(agent.signal.aborted, true);
+  assert.equal(batch.signal.aborted, false, "stopping one agent leaves the batch running");
+
+  assert.equal(runtime.cancelRootTarget("vigil-1"), undefined, "an already-stopped agent is not re-aborted");
+
+  assert.equal(runtime.cancelRootTarget("vigil+forge-a1b2"), "batch");
+  assert.equal(batch.signal.aborted, true);
+
+  assert.equal(runtime.cancelRootTarget("missing"), undefined, "unknown targets are not found");
+  assert.equal(runtime.cancelRootTarget("vigil+forge-a1b2"), undefined, "settled batches are not re-aborted");
+});
+
+test("cancelAgent reports false for unknown or already-settled handles", () => {
+  const runtime = validationRuntime([]);
+  const controller = new AbortController();
+  (runtime as any).agentCancels.set("forge-2", controller);
+
+  assert.equal(runtime.cancelAgent("forge-2"), true);
+  assert.equal(runtime.cancelAgent("forge-2"), false);
+  assert.equal(runtime.cancelAgent("atlas-9"), false);
+});
+
 test("a caller signal still cancels synchronous root batches through the batch controller", async () => {
   const runtime = validationRuntime([]);
   (runtime as any).runInvocation = (_request: unknown, _context: unknown, _requestIndex: number, signal?: AbortSignal) =>

@@ -82,6 +82,8 @@ export class SubagentRuntime {
   private readonly invocationCancels = new Set<(reason?: unknown) => void>();
   /** Abort controller per detached (background) root batch, keyed by batchId. */
   private readonly batchCancels = new Map<string, AbortController>();
+  /** Abort controller per live child invocation, keyed by the agent handle. */
+  private readonly agentCancels = new Map<string, AbortController>();
   private readonly pendingInvocations = new Set<Promise<InvocationResult>>();
   private readonly headingControllers = new Set<AbortController>();
   private modelRuntime?: ModelRuntime;
@@ -205,7 +207,7 @@ export class SubagentRuntime {
     onProgress?: (result: BatchResult) => void,
   ): BackgroundBatchLaunch {
     this.validateBatch(requests);
-    const batchId = randomUUID();
+    const batchId = this.nextBatchId(requests);
     const createdAt = Date.now();
     this.record({ type: "batch.started", batch: { id: batchId, createdAt } });
     const callId = randomUUID();
@@ -247,6 +249,52 @@ export class SubagentRuntime {
     if (!controller || controller.signal.aborted) return false;
     controller.abort(new Error(`Background batch ${batchId} cancelled by the parent session.`));
     return true;
+  }
+
+  /**
+   * Abort a single live child agent by its handle, leaving the rest of its
+   * batch running. Returns false when no live invocation owns that handle
+   * (unknown, queued elsewhere, or already settled).
+   */
+  cancelAgent(handle: string): boolean {
+    const controller = this.agentCancels.get(handle);
+    if (!controller || controller.signal.aborted) return false;
+    controller.abort(new Error(`Agent ${handle} cancelled by the parent session.`));
+    return true;
+  }
+
+  /**
+   * Stop a root background batch by its receipt batchId, or a single live
+   * agent by its handle. Returns the scope that was stopped, or undefined
+   * when the target matched nothing live. Handles and batch ids cannot
+   * collide: handles are slug-number, batch ids always carry a letter in
+   * their suffix (and a `+` when the batch spans roles).
+   */
+  cancelRootTarget(target: string): "batch" | "agent" | undefined {
+    if (this.cancelAgent(target)) return "agent";
+    if (this.cancelRootBatch(target)) return "batch";
+    return undefined;
+  }
+
+  /**
+   * Readable role-tagged root batch id: deduped role slugs joined with `+`
+   * plus a short letter-prefixed suffix, e.g. `vigil+forge-a1b2`. The suffix
+   * always starts with a letter so the id can never be mistaken for an agent
+   * handle (`vigil-1`); uniqueness is checked against restored state too.
+   */
+  private nextBatchId(requests: SubagentRequest[]): string {
+    const slugs: string[] = [];
+    for (const request of requests) {
+      const role = "role" in request ? request.role : this.state.agents.get(request.agent)?.role ?? request.agent;
+      const slug = roleSlug(role);
+      if (slug && !slugs.includes(slug)) slugs.push(slug);
+    }
+    const stem = slugs.length > 0 ? slugs.join("+") : "batch";
+    let batchId: string;
+    do {
+      batchId = `${stem}-${batchIdSuffix()}`;
+    } while (this.state.batches.has(batchId) || this.batchCancels.has(batchId));
+    return batchId;
   }
 
   async runRootBatch(requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void): Promise<BatchResult> {
@@ -417,6 +465,7 @@ export class SubagentRuntime {
     };
     const abortFromParent = () => cancel(signal?.reason);
     this.invocationCancels.add(cancel);
+    this.agentCancels.set(resolved.agent!.handle, controller);
     if (signal) {
       if (signal.aborted) cancel(signal.reason);
       else signal.addEventListener("abort", abortFromParent, { once: true });
@@ -609,6 +658,7 @@ export class SubagentRuntime {
       if (abortSession) controller.signal.removeEventListener("abort", abortSession);
       if (signal) signal.removeEventListener("abort", abortFromParent);
       this.invocationCancels.delete(cancel);
+      this.agentCancels.delete(invocation.agent);
       const activityChanged = this.activities.delete(invocation.id);
       this.activeToolCalls.delete(invocation.id);
       this.liveSessions.delete(invocation.agent);
@@ -651,6 +701,7 @@ export class SubagentRuntime {
     for (const cancel of [...this.invocationCancels]) cancel(reason);
     for (const controller of this.batchCancels.values()) controller.abort(reason);
     this.batchCancels.clear();
+    this.agentCancels.clear();
     await Promise.allSettled([...this.liveSessions.values()].map((session) => session.abort()));
     await Promise.allSettled([...this.pendingInvocations]);
     for (const session of this.liveSessions.values()) session.dispose();
@@ -958,4 +1009,16 @@ function sameUsage(left: Usage, right: Usage): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Lowercase dash-slug for a role name, mirroring agent handle allocation. */
+function roleSlug(role: string): string | undefined {
+  const slug = role.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return slug || undefined;
+}
+
+/** Short unique-ish suffix that always starts with a letter, e.g. `a1b2`. */
+function batchIdSuffix(): string {
+  const letter = "abcdefghijklmnopqrstuvwxyz";
+  return letter[Math.floor(Math.random() * letter.length)] + Math.random().toString(36).slice(2, 5);
 }

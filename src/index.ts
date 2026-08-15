@@ -367,10 +367,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             );
             return launch;
           },
-          cancelBackgroundBatch: (batchId) => {
+          cancelBackgroundTarget: (target) => {
             const owner = runtime;
             if (!owner) throw new Error("Subagent runtime is not available for this session.");
-            return owner.cancelRootBatch(batchId);
+            return owner.cancelRootTarget(target);
           },
         },
       ),

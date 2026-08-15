@@ -128,13 +128,14 @@ subagent({
 
 After every requested agent has settled—including failures, timeouts, and cancellations—the extension delivers one aggregated follow-up to the main session and triggers a turn when idle. A compact transcript card marks the result (`⟳ Background subagents · settled`) with one colored line per agent; expand it to read the full outputs the model received. Nested child-agent tools do not expose `background`; their delegations remain synchronous, including when the root batch itself is running in the background.
 
-The main agent can stop a detached batch with its receipt id — every agent in the batch aborts and the final (cancelled) result is still delivered as a follow-up:
+Root batch ids are compact role tags with a short suffix (e.g. `atlas+vigil-a1b2` for the call above), so the receipt reads like a label instead of a UUID. The main agent can stop a detached batch with its receipt id — every agent in the batch aborts and the final (cancelled) result is still delivered as a follow-up. It can also stop a single live agent by its handle (e.g. `vigil-1`), leaving the rest of the batch running:
 
 ```ts
 subagent({ background: { action: "cancel", batchId: "<batchId from the receipt>" } });
+subagent({ background: { action: "cancel", batchId: "vigil-1" } }); // stops just that agent
 ```
 
-An unknown or already-settled id returns a `not found` notice instead of an error.
+An unknown or already-settled id (or a handle that is no longer live) returns a `not found` notice instead of an error.
 
 Detached batches survive `/reload`: the reload keeps the process alive and re-invokes this extension, so the runtime hands its running child sessions off to the reloaded instance instead of aborting them. The agents keep working, their state stays visible in `/agents`, and the aggregated result is still delivered as a follow-up through the live session API. Branch navigation (e.g. `/back`, `/fork` moves within the session tree), quitting, or switching to another session still aborts running agents.
 

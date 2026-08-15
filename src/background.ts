@@ -122,7 +122,8 @@ function statusSummary(counts: Record<BackgroundRunStatus, number>): string {
 }
 
 function shortId(id: string): string {
-  return id.length > 8 ? id.slice(0, 8) : id;
+  // Role-tagged ids (e.g. vigil+forge-a1b2) fit whole; legacy UUIDs tail-slice.
+  return id.length <= 20 ? id : id.slice(-8);
 }
 
 function appendColoredOutput(lines: string[], content: string | ReadonlyArray<{ type: string; text?: string }>, theme: Theme): void {

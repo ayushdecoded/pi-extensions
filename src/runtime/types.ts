@@ -126,7 +126,7 @@ export type BackgroundBatchManage = {
 
 export type BackgroundBatchReceipt =
   | { background: true; batchId: string; status: "started"; agentCount: number }
-  | { background: true; batchId: string; status: "cancelled" }
+  | { background: true; batchId: string; status: "cancelled"; scope: "batch" | "agent" }
   | { background: true; batchId: string; status: "not-found" };
 
 export type SubagentToolResult = BatchResult | BackgroundBatchReceipt;
