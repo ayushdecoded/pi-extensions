@@ -187,6 +187,7 @@ The `web_search` tool searches DuckDuckGo Lite and reads URLs without a browser 
 - Follow-ups retain the same handle and display `↻` with their invocation number. Subagent tool calls show a prompt-free request roster, and results always show prompt-free per-invocation duration, token, and cost metrics.
 - `/agents` opens aligned batch history and nested agent trees plus a fullscreen read-only transcript viewer using Pi-native user, assistant, markdown, and thinking presentation.
 - The viewer never sends messages or cancellation commands to child agents.
+- `/breakdown` opens a full-height pane showing the per-model cost and token shares for the complete session tree (main session plus every subagent session): each model gets a cost bar tinted by the usual cost thresholds, a token bar, and `↑input ↓output ⚡cache`, sorted by cost, with a running total. `↑↓`/`j`/`k` scroll and `Esc` closes; non-TUI modes receive the same chart as plain text and it never triggers a model turn.
 
 ## Extension pack
 

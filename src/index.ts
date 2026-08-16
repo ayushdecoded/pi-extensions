@@ -60,6 +60,7 @@ import {
 import { createFooterController, contextLabelFor } from "./ui/footer.ts";
 import { installHeader } from "./ui/header.ts";
 import { AgentsPanel } from "./ui/panel.ts";
+import { BREAKDOWN_MESSAGE_TYPE, registerBreakdownCommand } from "./ui/breakdown.ts";
 import { createEmojiAutocompleteProvider } from "./ui/emoji-autocomplete.ts";
 import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
@@ -225,6 +226,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerAutoRename(pi);
   registerSaveMarkdown(pi);
   registerHandoffCommand(pi);
+  registerBreakdownCommand(pi);
   registerPromptDuration(pi);
   registerProactiveCompaction(pi);
   registerWebSearch(pi);
