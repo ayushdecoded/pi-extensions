@@ -37,15 +37,23 @@ export class AgentsPanel implements Component {
 export function renderPanel(runtime: SubagentRuntime, theme: Theme, width: number, now: number, minimized = false): string[] {
   const batches = projectBatches(runtime.state);
   if (!batches.length) return [];
-  const [latest] = batches;
-  if (!latest) return [];
-  const showLatest = latest.active || now - (latest.finishedAt ?? latest.startedAt) < 45_000;
-  if (minimized) return showLatest ? renderBatchSummary(latest, theme, now, width) : [];
-  const lines = showLatest ? renderBatchSummary(latest, theme, now, width) : [];
-  if (latest.active) {
-    latest.roots.forEach((root, index) => renderNode(lines, root, runtime, theme, width, now, "", index === latest.roots.length - 1));
-  }
-  if (lines.length) lines.push("");
+  // Every running/queued batch stays visible; only when nothing is running does
+  // the most recently settled batch linger briefly (45s) for context.
+  const active = batches.filter((batch) => batch.active);
+  const visible = active.length > 0
+    ? active
+    : batches.slice(0, 1).filter((batch) => now - (batch.finishedAt ?? batch.startedAt) < 45_000);
+  if (!visible.length) return minimized ? [] : [theme.fg("dim", "See all agent batches in /agents")];
+  if (minimized) return visible.map((batch) => renderBatchSummary(batch, theme, now, width)[0]);
+  const lines: string[] = [];
+  visible.forEach((batch, batchIndex) => {
+    if (batchIndex > 0) lines.push("");
+    lines.push(...renderBatchSummary(batch, theme, now, width));
+    if (batch.active) {
+      batch.roots.forEach((root, index) => renderNode(lines, root, runtime, theme, width, now, "", index === batch.roots.length - 1));
+    }
+  });
+  lines.push("");
   lines.push(theme.fg("dim", "See all agent batches in /agents"));
   return lines.map((line) => visibleWidth(line) <= Math.max(0, width) ? line : truncateToWidth(line, Math.max(0, width)));
 }

@@ -636,6 +636,30 @@ test("panel summary is one line and all ANSI-safe rows stay within responsive wi
   }
 });
 
+test("panel keeps every running batch visible and hides only settled ones", () => {
+  const state = emptyRuntimeState();
+  applyEvent(state, { type: "batch.started", batch: { id: "old", createdAt: 1 } });
+  applyEvent(state, { type: "invocation.queued", invocation: invocation({ id: "old-run", batchId: "old", agent: "atlas-1", role: "Atlas", status: "running", queuedAt: 1, startedAt: 2 }) });
+  applyEvent(state, { type: "batch.started", batch: { id: "new", createdAt: 3 } });
+  applyEvent(state, { type: "invocation.queued", invocation: invocation({ id: "new-run", batchId: "new", agent: "worker-1", role: "Worker", status: "running", queuedAt: 3, startedAt: 4 }) });
+  applyEvent(state, { type: "batch.started", batch: { id: "settled", createdAt: 5 } });
+  applyEvent(state, { type: "invocation.queued", invocation: invocation({ id: "done-run", batchId: "settled", agent: "vigil-1", role: "Vigil", status: "complete", queuedAt: 5, startedAt: 6, finishedAt: 7 }) });
+  const runtime = { state, activities: new Map() } as unknown as SubagentRuntime;
+  const theme = { fg: (_color: string, text: string) => text } as unknown as Parameters<typeof renderPanel>[1];
+
+  const expanded = renderPanel(runtime, theme, 120, 8_000).join("\n");
+  assert.match(expanded, /Atlas×1/);
+  assert.match(expanded, /Worker×1/);
+  assert.match(expanded, /└─ ◐ Atlas.*running/);
+  assert.match(expanded, /└─ ◐ Worker.*running/);
+  assert.doesNotMatch(expanded, /Vigil×1/, "settled batches stay out of the live panel");
+
+  const minimized = renderPanel(runtime, theme, 120, 8_000, true);
+  assert.equal(minimized.length, 2, "minimized panel lists one summary line per running batch");
+  assert.match(minimized[0]!, /Worker×1/, "newest running batch sorts first");
+  assert.match(minimized[1]!, /Atlas×1/);
+});
+
 test("compact panel shows only the latest batch, then expires to the dashboard hint", () => {
   const state = emptyRuntimeState();
   applyEvent(state, { type: "batch.started", batch: { id: "old", createdAt: 1 } });
