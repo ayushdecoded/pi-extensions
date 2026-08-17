@@ -162,8 +162,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   let currentConfig: AgentsConfig | undefined;
   let registered = false;
   const activeModeStore = createActiveModeStore();
-  const modelOverrideStore = createAgentModelOverrideStore();
-  let projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath());
+  const modelOverrideStore = createAgentModelOverrideStore(undefined, undefined, "$global");
+  let projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(), "$project");
   let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel }>();
   let configureScope: AgentConfigureScope = "session";
   const accounts = createAccountController(pi);
@@ -308,7 +308,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
       const allState = replayRuntimeState(ctx.sessionManager.getEntries());
       const activeState = replayRuntimeState(ctx.sessionManager.getBranch());
-      projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(ctx.cwd));
+      projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(ctx.cwd), "$project");
       sessionOverrides = new Map();
       next = new SubagentRuntime(
         {

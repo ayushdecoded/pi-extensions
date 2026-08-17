@@ -32,19 +32,30 @@ export function projectAgentsModelOverridesPath(cwd: string = process.cwd()): st
   return path.join(cwd, ".pi", AGENTS_MODEL_OVERRIDES_FILE_NAME);
 }
 
-export function createAgentModelOverrideStore(homeDir: string = os.homedir(), filePath?: string): AgentModelOverrideStore {
+export function createAgentModelOverrideStore(
+  homeDir: string = os.homedir(),
+  filePath?: string,
+  storageKey?: string,
+): AgentModelOverrideStore {
   const file = filePath ?? agentsModelOverridesPath(homeDir);
   return {
     get(configPath, preset, role) {
-      return parseRoleOverride(readOverrides(file)[configPath]?.[scopeKey(preset)]?.[role]);
+      const data = readOverrides(file);
+      const key = storageKey ?? configPath;
+      return parseRoleOverride(data[key]?.[scopeKey(preset)]?.[role])
+        ?? (storageKey === undefined ? undefined : parseRoleOverride(data[configPath]?.[scopeKey(preset)]?.[role]));
     },
     set(configPath, preset, role, override) {
       const data = readOverrides(file);
+      const key = storageKey ?? configPath;
       const scope = scopeKey(preset);
       if (override === undefined) {
-        delete data[configPath]?.[scope]?.[role];
+        delete data[key]?.[scope]?.[role];
+        if (storageKey !== undefined) delete data[configPath]?.[scope]?.[role];
       } else {
-        const previous = parseRoleOverride(data[configPath]?.[scope]?.[role]) ?? {};
+        const previous = parseRoleOverride(data[key]?.[scope]?.[role])
+          ?? (storageKey === undefined ? undefined : parseRoleOverride(data[configPath]?.[scope]?.[role]))
+          ?? {};
         const next: RoleOverride = {};
         // An explicitly-present key with `undefined` drops that field; an absent
         // key keeps the previous value (partial merge).
@@ -59,11 +70,12 @@ export function createAgentModelOverrideStore(homeDir: string = os.homedir(), fi
           next.thinking = previous.thinking;
         }
         if (Object.keys(next).length === 0) {
-          delete data[configPath]?.[scope]?.[role];
+          delete data[key]?.[scope]?.[role];
+          if (storageKey !== undefined) delete data[configPath]?.[scope]?.[role];
         } else {
-          data[configPath] ??= {};
-          data[configPath]![scope] ??= {};
-          data[configPath]![scope]![role] = next;
+          data[key] ??= {};
+          data[key]![scope] ??= {};
+          data[key]![scope]![role] = next;
         }
       }
       prune(data);
