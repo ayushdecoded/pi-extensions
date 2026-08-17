@@ -64,7 +64,7 @@ export type RuntimeToolExecution = {
  * agents.yaml content applies to delegations made after the reload.
  */
 export type RuntimeReloadRebind = Partial<
-  Pick<RuntimeOptions, "appendEvent" | "generateHeadings" | "accountExtension" | "routeAccountModel" | "modelRegistry" | "config">
+  Pick<RuntimeOptions, "appendEvent" | "generateHeadings" | "accountExtension" | "routeAccountModel" | "modelRegistry" | "config" | "roleOverride">
 >;
 
 export class SubagentRuntime {

@@ -286,6 +286,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         accountExtension: accounts.childExtension,
         routeAccountModel: accounts.routeModel,
         modelRegistry: ctx.modelRegistry,
+        roleOverride: (preset, role) => {
+          const key = `${preset ?? "$default"}\u0000${role}`;
+          const global = modelOverrideStore.get(config.path, preset, role);
+          const project = projectOverrideStore.get(config.path, preset, role);
+          const session = sessionOverrides.get(key);
+          if (!global && !project && !session) return undefined;
+          return { ...global, ...project, ...session };
+        },
       });
       try {
         adopted.setActiveMode(activeMode);
