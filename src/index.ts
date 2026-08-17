@@ -300,6 +300,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       } catch {
         adopted.setActiveMode(undefined);
       }
+      adopted.refreshRoles();
       // Reload resets the provider registry; rebuild the shared model runtime
       // so new child sessions resolve the freshly registered providers.
       adopted.resetModelRuntime();
