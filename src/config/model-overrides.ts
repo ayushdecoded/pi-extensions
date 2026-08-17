@@ -28,8 +28,12 @@ export function agentsModelOverridesPath(homeDir: string = os.homedir()): string
 }
 
 /** Persist model/thinking choices per complete config, preset, and canonical role name. */
-export function createAgentModelOverrideStore(homeDir: string = os.homedir()): AgentModelOverrideStore {
-  const file = agentsModelOverridesPath(homeDir);
+export function projectAgentsModelOverridesPath(cwd: string = process.cwd()): string {
+  return path.join(cwd, ".pi", AGENTS_MODEL_OVERRIDES_FILE_NAME);
+}
+
+export function createAgentModelOverrideStore(homeDir: string = os.homedir(), filePath?: string): AgentModelOverrideStore {
+  const file = filePath ?? agentsModelOverridesPath(homeDir);
   return {
     get(configPath, preset, role) {
       return parseRoleOverride(readOverrides(file)[configPath]?.[scopeKey(preset)]?.[role]);

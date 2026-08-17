@@ -21,7 +21,7 @@ import type {
   ThinkingLevel,
 } from "./config/agents.ts";
 import { createActiveModeStore, resolveActiveMode } from "./config/mode.ts";
-import { createAgentModelOverrideStore } from "./config/model-overrides.ts";
+import { createAgentModelOverrideStore, projectAgentsModelOverridesPath } from "./config/model-overrides.ts";
 import {
   BACKGROUND_SUBAGENT_RESULT_TYPE,
   deliverBackgroundBatchResult,
@@ -54,6 +54,7 @@ import { createSubagentTool } from "./tool.ts";
 import { AgentsDashboard } from "./ui/dashboard.ts";
 import {
   showAgentModelConfigure,
+  type AgentConfigureScope,
   type AgentModelChoice,
   type AgentRoleConfigureChange,
 } from "./ui/agents-configure.ts";
@@ -162,6 +163,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   let registered = false;
   const activeModeStore = createActiveModeStore();
   const modelOverrideStore = createAgentModelOverrideStore();
+  let projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath());
+  let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel }>();
+  let configureScope: AgentConfigureScope = "session";
   const accounts = createAccountController(pi);
   const footer = createFooterController(pi, {
     accountName: (providerId) => {
@@ -304,6 +308,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
       const allState = replayRuntimeState(ctx.sessionManager.getEntries());
       const activeState = replayRuntimeState(ctx.sessionManager.getBranch());
+      projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(ctx.cwd));
+      sessionOverrides = new Map();
       next = new SubagentRuntime(
         {
           rootSessionId: sessionId,
@@ -311,7 +317,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           cwd: ctx.cwd,
           config,
           activeMode,
-          roleOverride: (preset, role) => modelOverrideStore.get(config.path, preset, role),
+          roleOverride: (preset, role) => {
+            const key = `${preset ?? "$default"}\u0000${role}`;
+            const global = modelOverrideStore.get(config.path, preset, role);
+            const project = projectOverrideStore.get(config.path, preset, role);
+            const session = sessionOverrides.get(key);
+            if (!global && !project && !session) return undefined;
+            return { ...global, ...project, ...session };
+          },
           modelRegistry: ctx.modelRegistry,
           reservedHandles: new Set(allState.agents.keys()),
           appendEvent: (event: SubagentEvent) => pi.appendEntry(SUBAGENT_ENTRY_TYPE, event),
@@ -505,11 +518,23 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         const applyChange = (roleName: string, change: AgentRoleConfigureChange): void => {
           const role = configured.find((candidate) => candidate.name === roleName);
           if (!role) return;
-          switch (change.kind) {
-            case "model": modelOverrideStore.set(configPath, mode, role.name, { model: change.model }); break;
-            case "thinking": modelOverrideStore.set(configPath, mode, role.name, { thinking: change.thinking }); break;
-            case "reset-model": modelOverrideStore.set(configPath, mode, role.name, { model: undefined }); break;
-            case "reset-thinking": modelOverrideStore.set(configPath, mode, role.name, { thinking: undefined }); break;
+          const key = `${mode ?? "$default"}\u0000${role.name}`;
+          if (configureScope === "session") {
+            const previous = sessionOverrides.get(key) ?? {};
+            const next = { ...previous };
+            if (change.kind === "model") next.model = change.model;
+            else if (change.kind === "thinking") next.thinking = change.thinking;
+            else if (change.kind === "reset-model") delete next.model;
+            else if (change.kind === "reset-thinking") delete next.thinking;
+            if (Object.keys(next).length) sessionOverrides.set(key, next); else sessionOverrides.delete(key);
+          } else {
+            const store = configureScope === "project" ? projectOverrideStore : modelOverrideStore;
+            switch (change.kind) {
+              case "model": store.set(configPath, mode, role.name, { model: change.model }); break;
+              case "thinking": store.set(configPath, mode, role.name, { thinking: change.thinking }); break;
+              case "reset-model": store.set(configPath, mode, role.name, { model: undefined }); break;
+              case "reset-thinking": store.set(configPath, mode, role.name, { thinking: undefined }); break;
+            }
           }
           active.refreshRoles();
           ctx.ui.notify(`${role.name} ${describeConfigureChange(change)}`, "info");
@@ -518,6 +543,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           ctx,
           {
             mode,
+            scope: configureScope,
             roles: active.activeRoles.map((role) => {
               const base = configured.find((candidate) => candidate.name === role.name);
               return {
@@ -532,6 +558,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             allModels: projectAgentModels(ctx.modelRegistry.getAvailable(), ctx),
           },
           applyChange,
+          (scope) => { configureScope = scope; },
         );
         return;
       }

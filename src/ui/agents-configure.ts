@@ -3,6 +3,8 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { THINKING_LEVELS, type ThinkingLevel } from "../config/agents.ts";
 
+export type AgentConfigureScope = "session" | "project" | "global";
+
 export type AgentModelRoleChoice = {
   name: string;
   model: string;
@@ -28,6 +30,7 @@ export type AgentRoleConfigureChange =
 export type AgentModelConfigureInput = {
   /** Active preset name. Shown in the header; persistence is scoped to it. */
   mode?: string;
+  scope?: AgentConfigureScope;
   roles: AgentModelRoleChoice[];
   scopedModels: AgentModelChoice[];
   allModels: AgentModelChoice[];
@@ -50,6 +53,7 @@ const PANEL_WIDTH = 84;
  */
 export class AgentModelConfigurePanel implements Component {
   private stage: Stage = "roles";
+  private scope: AgentConfigureScope = "session";
   private index = 0;
   private role?: AgentModelRoleChoice;
   private provider?: string;
@@ -64,12 +68,21 @@ export class AgentModelConfigurePanel implements Component {
     private readonly keybindings: KeybindingsManager,
     private readonly onChange: (role: string, change: AgentRoleConfigureChange) => void,
     private readonly done: () => void,
+    private readonly onScopeChange: (scope: AgentConfigureScope) => void = () => {},
   ) {
+    this.scope = input.scope ?? "session";
     for (const role of input.roles) this.effective.set(role.name, { model: role.model, thinking: role.thinking });
   }
 
   handleInput(data: string): void {
     if (isKeyRelease(data)) return;
+    if (matchesKey(data, Key.ctrl("s"))) {
+      const scopes: AgentConfigureScope[] = ["session", "project", "global"];
+      this.scope = scopes[(scopes.indexOf(this.scope) + 1) % scopes.length]!;
+      this.onScopeChange(this.scope);
+      this.tui.requestRender();
+      return;
+    }
     if (matchesKey(data, Key.tab)) {
       this.all = !this.all;
       this.reconcileScope();
@@ -132,7 +145,7 @@ export class AgentModelConfigurePanel implements Component {
     const start = windowStart(this.index, items.length, bodyHeight);
     const scope = this.scopeIsEffective() ? (this.all ? "all" : "scoped") : "all";
     const modePart = this.input.mode ? `mode: ${this.input.mode}` : undefined;
-    const headerRight = [modePart, `${scope} models`].filter(Boolean).join(" · ");
+    const headerRight = [modePart, `scope: ${this.scope}`, `${scope} models`].filter(Boolean).join(" · ");
     const lines = [""];
     lines.push(joinSides(this.theme.fg("accent", "Configure subagents"), this.theme.fg("dim", headerRight), panelWidth));
     lines.push("");
@@ -313,9 +326,9 @@ export class AgentModelConfigurePanel implements Component {
   }
 
   private hint(): string {
-    const base = `↑↓ select · ↵ confirm · Tab ${this.all ? "scoped" : "all"} · esc ${this.stage === "roles" ? "cancel" : "back"}`;
-    if (this.stage === "models") return `${base}${this.search ? ` · filter: ${this.search}` : " · type to filter"}`;
-    if (this.stage === "settings") return `↑↓ select · ↵ edit · esc back`;
+    const base = `↑↓ select · ↵ confirm · Ctrl+S scope: ${this.scope} · Tab ${this.all ? "scoped" : "all"} · esc ${this.stage === "roles" ? "cancel" : "back"}`;
+    if (this.stage === "models") return `${this.search ? `filter: ${this.search} · ` : ""}${base}${this.search ? "" : " · type to filter"}`;
+    if (this.stage === "settings") return `${base} · ↑↓ select · ↵ edit · esc back`;
     return base;
   }
 
@@ -328,11 +341,12 @@ export async function showAgentModelConfigure(
   ctx: { mode: string; ui: { custom: Function } },
   input: AgentModelConfigureInput,
   onChange: (role: string, change: AgentRoleConfigureChange) => void,
+  onScopeChange: (scope: AgentConfigureScope) => void = () => {},
 ): Promise<void> {
   if (ctx.mode !== "tui" || input.roles.length === 0 || input.allModels.length === 0) return;
   await ctx.ui.custom(
     (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: () => void) =>
-      new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done),
+      new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done, onScopeChange),
     { overlay: true, overlayOptions: { width: PANEL_WIDTH, minWidth: 30, maxHeight: "80%", anchor: "center", margin: 2 } },
   );
 }
