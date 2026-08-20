@@ -1,147 +1,284 @@
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
+import {
+  defineTool,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { loadConfig } from "./config.ts";
-import type { SearchResult, WebSearchParams } from "./types.ts";
-import { duckDuckGoSearch, fetchPage } from "./primitives/fetch.ts";
-import { formatPage, formatResults, oneLine } from "./primitives/format.ts";
+import Parallel from "parallel-web";
+import {
+  createWebSearchSettingsStore,
+  loadWebSearchPolicy,
+  providerLabel,
+} from "./config.ts";
+import { duckDuckGoSearch } from "./duckduckgo.ts";
+import type {
+  DuckDuckGoResult,
+  ParallelSearchClient,
+  ParallelSearchResponse,
+  WebSearchDetails,
+  WebSearchParams,
+  WebSearchProvider,
+  WebSearchSettingsStore,
+} from "./types.ts";
 
-function normalizeTargets(value: string | undefined): string[] {
-  return (value ?? "")
-    .split(/\n+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+function oneLine(value: string, max = 280): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length <= max ? text : `${text.slice(0, max - 1).trim()}…`;
 }
 
-// Create one lean web_search tool. Public params stay query/url/mode/section;
-// limits, region, and fetch count are owned by local config.
-export function createWebSearchTool() {
-  const config = loadConfig();
+function formatParallelResults(response: ParallelSearchResponse): string {
+  if (response.results.length === 0) return "## Search results\n\nNo results found.";
+
+  const lines = ["## Search results", ""];
+  for (const [index, result] of response.results.entries()) {
+    const title = result.title?.trim() || result.url;
+    lines.push(`${index + 1}. [${title}](${result.url})`);
+    if (result.publish_date) lines.push(`   - Published: ${result.publish_date}`);
+    for (const excerpt of result.excerpts) {
+      const text = excerpt.trim();
+      if (text) lines.push("", `   ${text}`);
+    }
+    if (index < response.results.length - 1) lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+function formatDuckDuckGoResults(groups: Array<{ query: string; results: DuckDuckGoResult[] }>): string {
+  return groups
+    .map(({ query, results }) => {
+      const lines = [`## Search: ${query}`, ""];
+      if (results.length === 0) {
+        lines.push("No results found.");
+        return lines.join("\n");
+      }
+      for (const [index, result] of results.entries()) {
+        lines.push(`${index + 1}. [${result.title}](${result.url})`);
+        if (result.snippet) lines.push(`   - ${oneLine(result.snippet)}`);
+        if (index < results.length - 1) lines.push("");
+      }
+      return lines.join("\n");
+    })
+    .join("\n\n---\n\n");
+}
+
+export interface CreateWebSearchToolOptions {
+  client?: ParallelSearchClient;
+  sessionId?: string;
+  settingsStore?: WebSearchSettingsStore;
+}
+
+export interface ConfigureWebSearchOptions {
+  settingsStore?: WebSearchSettingsStore;
+}
+
+// One tool, with a selectable provider. Parallel queries are sent together in
+// one provider request; DuckDuckGo queries run concurrently for equivalent UX.
+export function createWebSearchTool(options: CreateWebSearchToolOptions = {}) {
+  const policy = loadWebSearchPolicy();
+  const sessionId = options.sessionId ?? randomUUID();
+  const settingsStore = options.settingsStore ?? createWebSearchSettingsStore();
+  let client = options.client;
+  let clientApiKey: string | undefined;
+
+  const getClient = (apiKey: string) => {
+    if (options.client) return options.client;
+    if (!client || clientApiKey !== apiKey) {
+      client = new Parallel({ apiKey });
+      clientApiKey = apiKey;
+    }
+    return client;
+  };
 
   return defineTool({
     name: "web_search",
     label: "Web Search",
-    description: "Search DuckDuckGo Lite or read URLs. Modes: search, structure, full, section.",
-    promptSnippet:
-      "Search DuckDuckGo Lite or read URLs. For multiple queries/URLs in one call, put each on its own line.",
+    description:
+      "Search the web using the configured DuckDuckGo or Parallel provider. Returns ranked sources with citation-friendly excerpts.",
+    promptSnippet: "Search the web using the configured web search provider",
     promptGuidelines: [
-      "Use when external web info is needed.",
-      "Use mode='structure' first for long pages, then mode='section'.",
-      "Cite URLs from results.",
+      "Use when current or external web information is needed.",
+      "Provide 2-3 concise keyword search queries when possible; each should be 3-6 words.",
+      "Write the objective as a self-contained description of the information needed.",
+      "Cite URLs from the returned results.",
     ],
     parameters: Type.Object({
-      query: Type.Optional(
-        Type.String({ description: "Search query. Use newlines for multiple." }),
+      objective: Type.Optional(
+        Type.String({
+          description:
+            "Self-contained description of the underlying question or research goal.",
+        }),
       ),
-      url: Type.Optional(Type.String({ description: "URL to fetch. Use newlines for multiple." })),
-      mode: Type.Optional(
-        Type.String({ description: "Return mode: search, structure, full, section." }),
-      ),
-      section: Type.Optional(
-        Type.String({ description: "Section heading, path, text, or index." }),
+      search_queries: Type.Optional(
+        Type.Array(
+          Type.String({
+            description:
+              "Concise keyword queries, 3-6 words each. Provide 2-3 when possible; maximum 5.",
+          }),
+        ),
       ),
     }),
     renderCall(args, theme) {
-      const count = normalizeTargets(args.url ?? args.query).length;
-      const target = count > 1 ? `${count} targets` : (args.url ?? args.query ?? "web");
-      const mode = args.mode ? ` · ${args.mode}` : "";
+      const queries = args.search_queries ?? [];
+      const target = queries.length > 1 ? `${queries.length} queries` : (queries[0] ?? "web");
       return new Text(
-        `${theme.fg("toolTitle", theme.bold("web_search"))}: ${theme.fg("accent", oneLine(target, 80))}${theme.fg("muted", mode)}`,
+        `${theme.fg("toolTitle", theme.bold("web_search"))}: ${theme.fg("accent", oneLine(target, 80))}`,
         0,
         0,
       );
     },
+    renderResult(result, options, theme, context) {
+      // UI shows queries only; raw excerpts stay in tool content for the model.
+      if ((context as unknown as { isError: boolean }).isError) {
+        const text = result.content.map((part) => (part as { text?: string }).text ?? "").join("\n").trim();
+        return new Text(theme.fg("error", text || "Search failed."), 0, 0);
+      }
+      if (options.isPartial) {
+        const queries = (context.args as WebSearchParams)?.search_queries ?? [];
+        if (queries.length === 0) return new Text(theme.fg("muted", "Searching…"), 0, 0);
+        const preview = queries.map((query) => `• ${oneLine(query, 80)}`).join("\n");
+        return new Text(`${theme.fg("muted", "Searching…")}\n${theme.fg("text", preview)}`, 0, 0);
+      }
+      const details = result.details as WebSearchDetails | undefined;
+      const args = context.args as WebSearchParams | undefined;
+      const queries = args?.search_queries ?? [];
+      const count = details?.resultCount ?? 0;
+      const provider = details?.provider ? providerLabel(details.provider) : "Search";
+      const lines: string[] = [];
+      lines.push(
+        theme.fg("muted", `${provider} · ${count} result${count === 1 ? "" : "s"} · hidden in UI, visible to model`),
+      );
+      if (queries.length > 0) {
+        lines.push("");
+        for (const query of queries) lines.push(theme.fg("text", `• ${oneLine(query, 80)}`));
+      }
+      if (args?.objective) {
+        lines.push("");
+        lines.push(theme.fg("dim", `objective: ${oneLine(args.objective, 100)}`));
+      }
+      return new Text(lines.join("\n"), 0, 0);
+    },
     async execute(_toolCallId, params: WebSearchParams, signal) {
-      const maxResults = config.maxResults;
-      const maxChars = config.maxChars;
-      const timeoutMs = config.timeoutMs;
-      const fetchTopN = config.fetchTopN;
-      const mode = ["search", "structure", "full", "section"].includes(params.mode ?? "")
-        ? params.mode!
-        : "search";
-      const fetchMode = mode === "search" ? "full" : mode;
+      const queries = (params.search_queries ?? []).map((query) => query.trim()).filter(Boolean);
+      if (queries.length === 0) {
+        throw new Error("web_search requires at least one search_queries item.");
+      }
+      if (queries.length > 5) {
+        throw new Error("web_search accepts at most 5 search_queries items.");
+      }
 
-      const queries = normalizeTargets(params.query);
-      const urls = normalizeTargets(params.url);
-      const label = [...urls, ...queries].join(" | ");
-
+      const settings = settingsStore.load();
       try {
-        if (urls.length > 0) {
-          // Explicit URLs are independent, so fetch them concurrently. This lets the
-          // model compare multiple sources with one tool call instead of serial calls.
-          const pages = await Promise.all(
-            urls.map((url) =>
-              fetchPage(url, {
-                mode: fetchMode,
-                section: params.section,
-                maxChars,
-                timeoutMs,
+        if (settings.provider === "duckduckgo") {
+          const groups = await Promise.all(
+            queries.map(async (query) => ({
+              query,
+              results: await duckDuckGoSearch(query, {
+                maxResults: policy.maxResults,
                 signal,
               }),
-            ),
+            })),
           );
-          const results: SearchResult[] = pages.map((page) => ({
-            title: page.url,
-            url: page.url,
-            snippet: "",
-            page,
-          }));
+          const details: WebSearchDetails = {
+            provider: settings.provider,
+            product: "search",
+            resultCount: groups.reduce((count, group) => count + group.results.length, 0),
+          };
           return {
-            content: [
-              {
-                type: "text",
-                text: pages.map((page) => formatPage(page).join("\n")).join("\n\n---\n\n"),
-              },
-            ],
-            details: { query: label, results },
+            content: [{ type: "text", text: formatDuckDuckGoResults(groups) }],
+            details,
           };
         }
 
-        if (queries.length === 0) throw new Error("web_search requires either query or url.");
-
-        // Multiple queries run in parallel and are rendered as separate result groups.
-        const groups = await Promise.all(
-          queries.map(async (query) => {
-            const results = await duckDuckGoSearch(query, {
-              maxResults,
-              region: config.region,
-              signal,
-            });
-            const shouldFetch = mode !== "search";
-            if (shouldFetch && results.length > 0) {
-              const pages = await Promise.all(
-                results.slice(0, Math.min(fetchTopN, results.length)).map((result) =>
-                  fetchPage(result.url, {
-                    mode: fetchMode,
-                    section: params.section,
-                    maxChars,
-                    timeoutMs,
-                    signal,
-                  }),
-                ),
-              );
-              for (let i = 0; i < pages.length; i++) results[i]!.page = pages[i];
-            }
-            return { query, results, shouldFetch };
-          }),
+        const apiKey = settings.parallelApiKey?.trim() || process.env.PARALLEL_API_KEY?.trim();
+        if (!apiKey) {
+          throw new Error("Parallel is not configured. Run /web-search and paste a Parallel API key.");
+        }
+        const response = await getClient(apiKey).search(
+          {
+            objective: params.objective?.trim() || undefined,
+            search_queries: queries,
+            mode: policy.mode,
+            max_chars_total: policy.maxCharsTotal,
+            session_id: sessionId,
+            advanced_settings: { max_results: policy.maxResults },
+          },
+          { signal },
         );
 
-        const allResults = groups.flatMap((group) => group.results);
-        const text = groups
-          .map((group) => formatResults(group.results, group.shouldFetch, group.query))
-          .join("\n\n---\n\n");
+        const details: WebSearchDetails = {
+          provider: settings.provider,
+          product: "search",
+          searchId: response.search_id,
+          sessionId: response.session_id,
+          resultCount: response.results.length,
+          warnings: response.warnings ?? undefined,
+          usage: response.usage ?? undefined,
+        };
         return {
-          content: [{ type: "text", text }],
-          details: { query: label, results: allResults },
+          content: [{ type: "text", text: formatParallelResults(response) }],
+          details,
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`web_search failed: ${message}`);
+        throw new Error(`${providerLabel(settings.provider)} web search failed: ${message}`);
       }
     },
   });
 }
 
+export async function configureWebSearch(
+  ctx: ExtensionCommandContext,
+  options: ConfigureWebSearchOptions = {},
+): Promise<void> {
+  if (!ctx.hasUI) throw new Error("/web-search requires an interactive UI.");
+
+  const settingsStore = options.settingsStore ?? createWebSearchSettingsStore();
+  const current = settingsStore.load();
+  const duckLabel = current.provider === "duckduckgo" ? "DuckDuckGo (active)" : "DuckDuckGo";
+  const parallelLabel = current.provider === "parallel" ? "Parallel (active)" : "Parallel";
+  const selected = await ctx.ui.select("Web search provider", [duckLabel, parallelLabel]);
+  if (!selected) return;
+
+  const provider: WebSearchProvider = selected.startsWith("Parallel") ? "parallel" : "duckduckgo";
+  if (provider === "duckduckgo") {
+    settingsStore.save({ ...current, provider });
+    ctx.ui.notify("Web search provider: DuckDuckGo", "info");
+    return;
+  }
+
+  let apiKey = current.parallelApiKey;
+  if (apiKey) {
+    const replace = await ctx.ui.confirm("Parallel API key", "Replace the saved API key?");
+    if (!replace) {
+      settingsStore.save({ ...current, provider });
+      ctx.ui.notify("Web search provider: Parallel", "info");
+      return;
+    }
+  }
+
+  const pasted = await ctx.ui.input("Paste Parallel API key", "PARALLEL_API_KEY");
+  if (!pasted?.trim()) {
+    ctx.ui.notify("Parallel was not selected because no API key was provided.", "warning");
+    return;
+  }
+  apiKey = pasted.trim();
+  settingsStore.save({ provider, parallelApiKey: apiKey });
+  ctx.ui.notify("Web search provider: Parallel", "info");
+}
+
 export default function registerWebSearch(pi: ExtensionAPI): void {
-  pi.registerTool(createWebSearchTool());
+  const settingsStore = createWebSearchSettingsStore();
+  pi.registerTool(createWebSearchTool({ settingsStore }));
+  pi.registerCommand("web-search", {
+    description: "Choose DuckDuckGo or Parallel for web search",
+    handler: async (_args, ctx) => {
+      try {
+        await configureWebSearch(ctx, { settingsStore });
+      } catch (error) {
+        ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+      }
+    },
+  });
 }
