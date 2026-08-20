@@ -1,15 +1,36 @@
-import type { WebSearchConfig } from "./types.ts";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import type { WebSearchSettings, WebSearchSettingsStore } from "./types.ts";
 
-// Local policy, not model-controlled. Keep this tiny and deterministic.
-export const DEFAULT_CONFIG: Required<Omit<WebSearchConfig, "region">> &
-  Pick<WebSearchConfig, "region"> = {
-  maxResults: 5,
-  maxChars: 12000,
-  timeoutMs: 10000,
-  fetchTopN: 1,
-  region: undefined,
-};
+export function webSearchSettingsPath(homeDir: string = os.homedir()): string {
+  return path.join(homeDir, ".config", "pi", "web-search.json");
+}
 
-export function loadConfig(): typeof DEFAULT_CONFIG {
-  return DEFAULT_CONFIG;
+export function createWebSearchSettingsStore(
+  filePath: string = webSearchSettingsPath(),
+): WebSearchSettingsStore {
+  return {
+    load() {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>;
+        return typeof parsed.parallelApiKey === "string" && parsed.parallelApiKey.trim()
+          ? { parallelApiKey: parsed.parallelApiKey.trim() }
+          : {};
+      } catch {
+        return {};
+      }
+    },
+    save(settings) {
+      const directory = path.dirname(filePath);
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+      fs.chmodSync(directory, 0o700);
+      fs.writeFileSync(filePath, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+      fs.chmodSync(filePath, 0o600);
+    },
+  };
+}
+
+export function loadWebSearchSettings(): WebSearchSettings {
+  return createWebSearchSettingsStore().load();
 }

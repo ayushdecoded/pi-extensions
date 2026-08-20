@@ -1,110 +1,35 @@
 # Modifying web search
 
-Keep the tool small: `query`, `url`, `mode`, `section`.
+The extension exposes one Parallel-backed `web_search` tool and one
+`/web-search` API-key configuration command.
 
-## Rules
-
-- Do not add result-count, timeout, region, or max-character tool params.
-- Use newline-separated strings for multi-search/multi-fetch.
-- Keep output Markdown and citation-friendly.
-- Keep fetching, parsing, shaping, and formatting separate.
-
-## Change public API
-
-Edit:
+## Public API
 
 ```text
-index.ts
-types.ts
+objective: string
+search_queries: string[3]
 ```
 
-The schema should stay easy for models. Prefer local policy in `config.ts` over new tool params.
+The objective must be self-contained. Each query should contain the key entity
+or topic, use three to six words, and vary names, synonyms, or angles. Queries
+must not be sentences, instructions, or `site:` expressions.
 
-## Change search/fetch behavior
+## Behavior
 
-Edit:
+`index.ts` owns validation, the `parallel-web` SDK call, output formatting, and
+the command. Search uses `basic` mode and passes the consuming model ID. Do not
+add advanced result limits unless a product requirement justifies restricting
+Parallel's retrieval; bound tool output locally instead.
 
-```text
-primitives/fetch.ts
-```
-
-Responsibilities:
-
-- DuckDuckGo Lite request
-- DuckDuckGo result parsing
-- URL fetch
-- timeout and parent abort forwarding
-
-`fetchRawPage()` owns network cancellation. Keep the comments around `AbortController`; it exists because `fetch` has no native timeout and Pi may cancel the tool call.
-
-## Change parsing or section behavior
-
-Edit:
-
-```text
-primitives/html.ts
-primitives/page.ts
-```
-
-Responsibilities:
-
-- `html.ts`: clean HTML/text, extract headings, split into sections, filter sections.
-- `page.ts`: detect HTML/text, parse sections, shape `structure`/`section`/`full` results.
-
-If malformed JS/MDX leaks into output, update the noise filtering in `html.ts`.
-
-## Change output format
-
-Edit:
-
-```text
-primitives/format.ts
-```
-
-Output should remain Markdown:
-
-```md
-## Search: query
-
-1. [Title](https://url)
-   - Snippet
-```
-
-```md
-## Page: https://url
-
-- Status: OK, HTTP 200
-- Mode: full
-```
-
-## Change limits/defaults
-
-Edit:
-
-```text
-config.ts
-```
-
-Current defaults:
-
-```text
-maxResults: 5
-maxChars: 12000
-timeoutMs: 10000
-fetchTopN: 1
-region: undefined
-```
+The API key is stored at `~/.config/pi/web-search.json` with mode `0600`.
+`PARALLEL_API_KEY` is accepted as a fallback.
 
 ## Checks
 
 ```text
-npm run check
+npm run typecheck
+npm test
 ```
 
-Smoke test patterns:
-
-```text
-query: DuckDuckGo Lite
-query: DuckDuckGo Lite\nPlaywright MCP
-url: https://example.com, mode: structure
-```
+A live smoke test requires configuring a key with `/web-search` or setting
+`PARALLEL_API_KEY`.

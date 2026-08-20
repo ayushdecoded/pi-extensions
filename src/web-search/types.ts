@@ -1,42 +1,28 @@
-export interface PageSection {
-  index: number;
-  level: number;
-  heading: string;
-  path: string;
-  text: string;
-  chars: number;
-}
+import type Parallel from "parallel-web";
 
-export interface FetchedPage {
-  url: string;
-  ok: boolean;
-  status?: number;
-  contentType?: string;
-  mode?: string;
-  text?: string;
-  sections?: Array<Omit<PageSection, "text"> & { text?: string; truncated?: boolean }>;
-  error?: string;
-  truncated?: boolean;
-}
-
-export interface SearchResult {
-  title: string;
-  url: string;
-  snippet: string;
-  page?: FetchedPage;
-}
+export type ParallelSearchClient = Pick<Parallel, "search">;
+export type ParallelSearchResponse = Awaited<ReturnType<Parallel["search"]>>;
 
 export interface WebSearchParams {
-  query?: string;
-  url?: string;
-  mode?: string;
-  section?: string;
+  objective: string;
+  search_queries: string[];
 }
 
-export interface WebSearchConfig {
-  maxResults?: number;
-  maxChars?: number;
-  timeoutMs?: number;
-  fetchTopN?: number;
-  region?: string;
+export interface WebSearchDetails {
+  provider: "parallel";
+  product: "search";
+  searchId?: string;
+  sessionId?: string;
+  resultCount: number;
+  warnings?: unknown;
+  usage?: unknown;
+}
+
+export interface WebSearchSettings {
+  parallelApiKey?: string;
+}
+
+export interface WebSearchSettingsStore {
+  load(): WebSearchSettings;
+  save(settings: WebSearchSettings): void;
 }

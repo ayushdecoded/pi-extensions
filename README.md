@@ -172,7 +172,7 @@ Requires a `pw-record` (PipeWire) on the machine and an `openai-codex` model sig
 
 ## Web search
 
-The `web_search` tool searches DuckDuckGo Lite and reads URLs without a browser dependency. Its public inputs remain deliberately small: `query`, `url`, `mode`, and `section`. Result count, output budget, timeout, region, and fetch depth are local policy rather than model-controlled parameters.
+The `web_search` tool uses Parallel through the official `parallel-web` TypeScript SDK. Run `/web-search` to securely store a Parallel API key, or set `PARALLEL_API_KEY`. Each call supplies a self-contained objective and exactly three diverse keyword queries, following Parallel's tool-calling best practices. Search runs in `basic` mode, passes the consuming model ID for excerpt optimization, and bounds returned tool content locally.
 
 ## UI
 

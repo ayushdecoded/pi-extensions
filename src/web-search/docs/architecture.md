@@ -1,88 +1,32 @@
 # Web search architecture
 
-The web search extension exposes one `web_search` tool for DuckDuckGo Lite search and URL reading.
-
-## Layout
-
-```text
-index.ts              extension registration, tool schema, multi-target orchestration
-types.ts              params, config, search result, fetched page shapes
-config.ts             local defaults for limits and fetch policy
-
-primitives/
-  fetch.ts            DuckDuckGo Lite search, URL fetch, timeout/abort control
-  page.ts             raw page -> sections -> shaped FetchedPage
-  html.ts             HTML/text cleanup, heading extraction, section filtering
-  format.ts           Markdown output for model context
-```
+The extension exposes one Parallel-backed `web_search` tool and one
+`/web-search` command for securely storing its API key.
 
 ## Flow
 
-Search:
-
 ```text
-web_search query
-  -> index.ts splits newline-separated queries
-  -> fetch.ts queries DuckDuckGo Lite in parallel
-  -> format.ts renders Markdown result lists
+/web-search
+  -> paste Parallel API key
+  -> store with restrictive permissions
+
+web_search({ objective, search_queries })
+  -> terminal card shows the three queries
+  -> one Parallel Search API request
+  -> ranked URLs, titles, dates, and LLM-optimized excerpts
+  -> excerpts remain model-visible and are hidden from the terminal UI
 ```
 
-URL read:
+## Authentication
 
-```text
-web_search url
-  -> index.ts splits newline-separated URLs
-  -> fetch.ts fetches URLs in parallel
-  -> page.ts parses and shapes pages by mode
-  -> html.ts extracts text/sections
-  -> format.ts renders Markdown pages
-```
+The Parallel API key pasted through `/web-search` is stored at
+`~/.config/pi/web-search.json` with restrictive file permissions.
+`PARALLEL_API_KEY` is also accepted as a fallback.
 
-## Modes
+## Search semantics
 
-```text
-search      DuckDuckGo result list only
-structure   page outline/headings only
-full        bounded page text grouped by sections
-section     selected section text by index/heading/path/text match
-```
-
-## Multi-target input
-
-Multiple queries or URLs are passed as newline-separated strings:
-
-```json
-{ "query": "DuckDuckGo Lite\nPlaywright MCP", "mode": "search" }
-```
-
-```json
-{ "url": "https://example.com\nhttps://playwright.dev", "mode": "structure" }
-```
-
-Each target is processed concurrently and rendered as a separate Markdown block separated by `---`.
-
-## Output
-
-Tool output is Markdown for model readability and citation:
-
-```md
-## Search: DuckDuckGo Lite
-
-- Results: 5
-
-1. [Title](https://example.com)
-   - Snippet
-```
-
-Fetched pages use:
-
-```md
-## Page: https://example.com
-
-- Status: OK, HTTP 200
-- Mode: structure
-
-### Outline
-
-- [0] Heading (123 chars)
-```
+The objective is a self-contained natural-language research goal. Exactly three
+diverse keyword queries of three to six words are supplied with it, following
+Parallel's tool-calling best practices. Search uses `basic` mode and identifies
+the consuming model so Parallel can optimize its excerpts. Provider defaults
+control retrieval breadth; the returned tool content is capped locally.
