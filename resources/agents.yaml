@@ -27,6 +27,8 @@ roles:
     prompt: agents/forge.md
     tools: [read, bash, edit, write]
     delegates: []
+    backend: native
+    backendOptions: [native, devin]
     skills: []
     timeoutMinutes: 20
   Vigil:

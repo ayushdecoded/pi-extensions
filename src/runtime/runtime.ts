@@ -1,4 +1,5 @@
 import * as path from "node:path";
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import {
   createAgentSession,
@@ -19,6 +20,7 @@ import { CapacityLease, CapacityScheduler } from "./scheduler.ts";
 import { advanceStateRevision, applyEvent, emptyRuntimeState, sessionEntriesUsage, usageDelta } from "./state.ts";
 import { createRoleResourceLoader } from "./resources.ts";
 import { ActiveWorkTimeout } from "./timeout.ts";
+import { DevinAcpClient, isDevinBackend, type DevinAcpUpdate } from "./devin.ts";
 import {
   ZERO_USAGE,
   type AgentRecord,
@@ -47,6 +49,13 @@ export type RuntimeToolResult = {
   details?: unknown;
 };
 
+export type RuntimeDevinTranscript = {
+  messages: unknown[];
+  streamingMessage?: unknown;
+  pendingToolCalls: Set<string>;
+  revision: number;
+};
+
 export type RuntimeToolExecution = {
   toolCallId: string;
   toolName: string;
@@ -72,6 +81,8 @@ export class SubagentRuntime {
   readonly state: RuntimeState;
   readonly activities = new Map<string, RuntimeActivity>();
   readonly liveSessions = new Map<string, AgentSession>();
+  /** Live transcript state for external Devin sessions while their ACP turn streams. */
+  readonly devinTranscripts = new Map<string, RuntimeDevinTranscript>();
   /** Authoritative lifecycle snapshots for tool calls in currently live child sessions. */
   readonly toolExecutions = new Map<string, Map<string, RuntimeToolExecution>>();
   private readonly activeToolCalls = new Map<string, Map<string, string>>();
@@ -87,6 +98,7 @@ export class SubagentRuntime {
   private readonly agentCancels = new Map<string, AbortController>();
   private readonly pendingInvocations = new Set<Promise<InvocationResult>>();
   private readonly headingControllers = new Set<AbortController>();
+  private readonly devinClients = new Map<string, DevinAcpClient>();
   private modelRuntime?: ModelRuntime;
   private modelRuntimePromise?: Promise<ModelRuntime>;
   private disposed = false;
@@ -139,7 +151,10 @@ export class SubagentRuntime {
       if (!override) return role;
       const model = override.model && override.model !== role.model ? override.model : undefined;
       const thinking = override.thinking && override.thinking !== role.thinking ? override.thinking : undefined;
-      return model || thinking ? { ...role, ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) } : role;
+      const backend = override.backend && override.backend !== role.backend ? override.backend : undefined;
+      return model || thinking || backend
+        ? { ...role, ...(model ? { model } : {}), ...(thinking ? { thinking } : {}), ...(backend ? { backend } : {}) }
+        : role;
     });
   }
 
@@ -402,7 +417,13 @@ export class SubagentRuntime {
       });
       const sessionFile = sessionManager.getSessionFile();
       if (!sessionFile) throw new Error("Pi did not create a persistent child session.");
-      const agent: AgentRecord = { handle, role: role.name, sessionFile, createdAt: Date.now() };
+      const agent: AgentRecord = {
+        handle,
+        role: role.name,
+        sessionFile,
+        createdAt: Date.now(),
+        backend: role.backend ?? "native",
+      };
       this.reservedHandles.add(handle);
       this.record({ type: "agent.created", agent });
       resolved = {
@@ -419,7 +440,7 @@ export class SubagentRuntime {
       const timeoutMinutes = this.resolveTimeout(request.timeoutMinutes, role);
       sessionManager = SessionManager.open(agent.sessionFile, this.sessionDir(), this.options.cwd);
       resolved = {
-        role,
+        role: agent.backend && agent.backend !== role.backend ? { ...role, backend: agent.backend } : role,
         agent,
         task: request.task.trim(),
         timeoutMinutes,
@@ -433,6 +454,7 @@ export class SubagentRuntime {
       ...(context.callId ? { callId: context.callId, requestIndex } : {}),
       agent: resolved.agent!.handle,
       role: resolved.role.name,
+      backend: resolved.role.backend ?? "native",
       task: resolved.task,
       followup: resolved.followup,
       ordinal: this.invocationCount(resolved.agent!.handle) + 1,
@@ -469,6 +491,89 @@ export class SubagentRuntime {
     try {
       lease = await this.scheduler.acquire(controller.signal);
       controller.signal.throwIfAborted();
+
+      if (isDevinBackend(resolved.role.backend)) {
+        const client = this.devinClients.get(resolved.agent!.handle) ?? new DevinAcpClient(this.options.cwd, "swe-1-7", this.options.devinCommand ?? "devin");
+        this.devinClients.set(resolved.agent!.handle, client);
+        try {
+          await client.start();
+        } catch (error) {
+          client.dispose();
+          this.devinClients.delete(resolved.agent!.handle);
+          throw error;
+        }
+        let backendSessionId = resolved.agent!.backendSessionId;
+        if (backendSessionId) await client.loadSession(backendSessionId);
+        else {
+          backendSessionId = await client.newSession();
+          this.record({ type: "agent.backend-session", handle: resolved.agent!.handle, sessionId: backendSessionId });
+        }
+        abortSession = () => client.cancel(backendSessionId!);
+        controller.signal.addEventListener("abort", abortSession, { once: true });
+        if (controller.signal.aborted) {
+          abortSession();
+          controller.signal.throwIfAborted();
+        }
+        before = { ...ZERO_USAGE };
+        this.record({
+          type: "invocation.running",
+          id: invocation.id,
+          startedAt: Date.now(),
+          usageBaseline: before,
+        });
+        if (resolved.timeoutMinutes !== -1) {
+          activeTimeout = new ActiveWorkTimeout(resolved.timeoutMinutes * 60_000, () => {
+            if (controller.signal.aborted) return;
+            stopCause = "timeout";
+            controller.abort(new Error(`Timed out after ${resolved.timeoutMinutes} minute(s).`));
+          });
+          activeTimeout.resume();
+        }
+        sessionManager.appendMessage(externalUserMessage(resolved.task));
+        this.devinTranscripts.set(invocation.agent, {
+          messages: sessionManager.getEntries()
+            .filter((entry) => entry.type === "message")
+            .map((entry) => entry.message),
+          pendingToolCalls: new Set(),
+          revision: 1,
+        });
+        this.notifyTranscript(invocation.agent);
+        const prompt = resolved.followup
+          ? resolved.task
+          : `${readFileSync(resolved.role.promptFile, "utf8").trim()}\n\nAssigned task:\n${resolved.task}`;
+        const result = await client.prompt(backendSessionId, prompt, controller.signal, (update) => {
+          this.updateDevinActivity(invocation.id, invocation.agent, update);
+          this.notifyTranscript(invocation.agent);
+        });
+        activeTimeout?.pause();
+        if (controller.signal.aborted) {
+          const timedOut = stopCause === "timeout";
+          return this.finish(
+            invocation.id,
+            timedOut ? "failed" : "cancelled",
+            { ...ZERO_USAGE },
+            undefined,
+            timedOut ? `Timed out after ${resolved.timeoutMinutes} minute(s).` : "Cancelled by the parent session.",
+          );
+        }
+        if (result.output) {
+          sessionManager.appendMessage(externalAssistantMessage(result.output));
+          const transcript = this.devinTranscripts.get(invocation.agent);
+          if (transcript) {
+            transcript.messages = sessionManager.getEntries()
+              .filter((entry) => entry.type === "message")
+              .map((entry) => entry.message);
+            transcript.streamingMessage = undefined;
+            transcript.revision += 1;
+          }
+          this.notifyTranscript(invocation.agent);
+        }
+        if (result.stopReason === "cancelled") {
+          return this.finish(invocation.id, "cancelled", { ...ZERO_USAGE }, result.output || undefined, "Cancelled by the parent session.");
+        }
+        if (!result.output) return this.finish(invocation.id, "failed", { ...ZERO_USAGE }, undefined, "Devin produced no final response.");
+        return this.finish(invocation.id, "complete", { ...ZERO_USAGE }, result.output);
+      }
 
       const { loader, settings } = await createRoleResourceLoader(
         this.options.cwd,
@@ -658,6 +763,7 @@ export class SubagentRuntime {
       this.activeToolCalls.delete(invocation.id);
       this.liveSessions.delete(invocation.agent);
       this.toolExecutions.delete(invocation.agent);
+      this.devinTranscripts.delete(invocation.agent);
       this.notifyTranscript(invocation.agent);
       session?.dispose();
       lease?.release();
@@ -700,6 +806,8 @@ export class SubagentRuntime {
     await Promise.allSettled([...this.liveSessions.values()].map((session) => session.abort()));
     await Promise.allSettled([...this.pendingInvocations]);
     for (const session of this.liveSessions.values()) session.dispose();
+    for (const client of this.devinClients.values()) client.dispose();
+    this.devinClients.clear();
     for (const handle of this.liveSessions.keys()) this.notifyTranscript(handle);
     this.liveSessions.clear();
     this.toolExecutions.clear();
@@ -777,6 +885,28 @@ export class SubagentRuntime {
       isPartial: update.isPartial ?? previous?.isPartial ?? true,
       revision: (previous?.revision ?? 0) + 1,
     });
+  }
+
+  private updateDevinActivity(invocationId: string, handle: string, update: DevinAcpUpdate): void {
+    const transcript = this.devinTranscripts.get(handle);
+    if (transcript && update.kind === "text") {
+      const previous = transcript.streamingMessage as { content?: Array<{ type?: string; text?: string }> } | undefined;
+      const previousText = previous?.content?.find((part) => part.type === "text")?.text ?? "";
+      transcript.streamingMessage = externalAssistantMessage(previousText + update.text);
+      transcript.revision += 1;
+    }
+    if (update.kind === "text") {
+      this.activities.set(invocationId, { invocationId, detail: "responding" });
+    } else if (update.active) {
+      this.activities.set(invocationId, {
+        invocationId,
+        tool: update.name ?? "devin",
+        detail: "working",
+      });
+    } else {
+      this.activities.set(invocationId, { invocationId, detail: "responding" });
+    }
+    this.notify();
   }
 
   private syncToolActivity(invocationId: string): void {
@@ -1000,6 +1130,30 @@ export function usageWithPendingAssistant(persisted: Usage, message: Pick<Assist
 function sameUsage(left: Usage, right: Usage): boolean {
   return left.input === right.input && left.output === right.output && left.cacheRead === right.cacheRead &&
     left.cacheWrite === right.cacheWrite && left.total === right.total && left.cost === right.cost;
+}
+
+function externalUserMessage(text: string): any {
+  return { role: "user", content: [{ type: "text", text }], timestamp: Date.now() };
+}
+
+function externalAssistantMessage(text: string): any {
+  return {
+    role: "assistant",
+    content: [{ type: "text", text }],
+    api: "openai-completions",
+    provider: "devin",
+    model: "swe-1-7",
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: Date.now(),
+  };
 }
 
 function errorMessage(error: unknown): string {

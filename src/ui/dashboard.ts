@@ -3,6 +3,7 @@ import type { KeybindingsManager, Theme, ToolDefinition } from "@earendil-works/
 import { getMarkdownTheme, SessionManager } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { isKeyRelease, Markdown, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { agentModelLabel } from "../config/agents.ts";
 import type { RuntimeToolExecution, SubagentRuntime } from "../runtime/runtime.ts";
 import type { InvocationRecord } from "../runtime/types.ts";
 import { fitWithDotLeader, joinWithDotLeader } from "./leaders.ts";
@@ -141,7 +142,8 @@ export class AgentsDashboard implements Component {
         const marker = selected ? this.theme.fg("accent", "❯") : " ";
         const followup = invocation.followup ? ` ${this.theme.fg("accent", "↻")}` : "";
         const configured = roleConfiguration(this.runtime, invocation.role);
-        const model = configured?.model.split("/").at(-1) ?? "?";
+        const effectiveBackend = invocation.backend ?? this.runtime.state.agents.get(invocation.agent)?.backend ?? configured?.backend;
+        const model = configured ? agentModelLabel(configured.model, effectiveBackend) : effectiveBackend === "devin" ? agentModelLabel("", effectiveBackend) : "?";
         const left = ` ${marker} ${row.treePrefix} ${statusMarker(invocation, this.theme)} ${roleText(invocation.role, invocation.role, this.theme)}${followup}`;
         const rightParts = [
           this.theme.fg(statusColor(invocation), invocation.status),
@@ -225,7 +227,8 @@ export class AgentsDashboard implements Component {
     this.scroll = Math.min(this.scroll, maxScroll);
     const followup = invocation.followup ? ` ${this.theme.fg("accent", "↻")}` : "";
     const configured = roleConfiguration(this.runtime, invocation.role);
-    const model = configured?.model.split("/").at(-1) ?? "?";
+    const effectiveBackend = invocation.backend ?? this.runtime.state.agents.get(invocation.agent)?.backend ?? configured?.backend;
+    const model = configured ? agentModelLabel(configured.model, effectiveBackend) : effectiveBackend === "devin" ? agentModelLabel("", effectiveBackend) : "?";
     const role = `${roleText(invocation.role, invocation.role, this.theme)}${followup}`;
     const requestHeading = invocation.heading ?? compactTaskHeading(invocation.task);
     const titleRoom = Math.max(0, frameWidth - 4);
@@ -343,6 +346,19 @@ export class AgentsDashboard implements Component {
         // Only calls observed in this live invocation may borrow its custom
         // definition; older calls in a resumed session remain historical fallback.
         getToolDefinition: (toolCallId, toolName) => currentToolCallIds.has(toolCallId) ? live.getToolDefinition(toolName) : undefined,
+      };
+    }
+    const devin = this.runtime.devinTranscripts?.get(handle);
+    if (devin) {
+      return {
+        key: `devin:${handle}`,
+        revision: String(devin.revision),
+        messages: devin.streamingMessage ? [...devin.messages, devin.streamingMessage] : devin.messages,
+        volatileTail: Boolean(devin.streamingMessage),
+        runningCalls: devin.pendingToolCalls,
+        stableMessages: devin.messages,
+        liveTools: undefined,
+        getToolDefinition: undefined,
       };
     }
     try {

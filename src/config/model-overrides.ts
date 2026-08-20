@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { THINKING_LEVELS, type ThinkingLevel } from "./agents.ts";
+import { THINKING_LEVELS, type AgentBackend, type ThinkingLevel } from "./agents.ts";
 
 export const AGENTS_MODEL_OVERRIDES_FILE_NAME = "agents-model-overrides.json";
 const NO_PRESET = "$default";
@@ -10,6 +10,11 @@ const NO_PRESET = "$default";
 export type RoleOverride = {
   model?: string;
   thinking?: ThinkingLevel;
+};
+
+/** Session-only execution override; backend is never persisted to disk. */
+export type SessionRoleOverride = RoleOverride & {
+  backend?: AgentBackend;
 };
 
 // File shape: { [configPath]: { [scope]: { [role]: string | { model?, thinking? } } } }

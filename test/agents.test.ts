@@ -45,6 +45,54 @@ test("loads project config and keeps the direct model ID", async () => {
   assert.deepEqual(config.roles[0].delegates, []);
 });
 
+test("parses optional Devin backend choices without changing native defaults", async () => {
+  const cwd = await fixture();
+  const sourcePath = projectAgentsPath(cwd);
+  const config = parseAgentsConfig({
+    version: 1,
+    defaults: { maxDepth: 1, concurrency: 2, timeoutMinutes: 10 },
+    roles: {
+      Forge: {
+        description: "Implement bounded changes",
+        model: "openai-codex/gpt-5.6-luna",
+        thinking: "high",
+        prompt: "agents/worker.md",
+        tools: ["read"],
+        backend: "native",
+        backendOptions: ["native", "devin"],
+      },
+      Atlas: {
+        description: "Research",
+        model: "openai-codex/gpt-5.6-luna",
+        thinking: "high",
+        prompt: "agents/atlas.md",
+        tools: ["read"],
+      },
+    },
+  }, sourcePath);
+  assert.equal(config.roles.find((role) => role.name === "Forge")?.backend, "native");
+  assert.deepEqual(config.roles.find((role) => role.name === "Forge")?.backendOptions, ["native", "devin"]);
+  assert.equal(config.roles.find((role) => role.name === "Atlas")?.backend, "native");
+  assert.throws(
+    () => parseAgentsConfig({
+      version: 1,
+      defaults: { maxDepth: 1, concurrency: 2, timeoutMinutes: 10 },
+      roles: {
+        Forge: {
+          description: "Implement bounded changes",
+          model: "openai-codex/gpt-5.6-luna",
+          thinking: "high",
+          prompt: "agents/worker.md",
+          tools: ["read"],
+          backend: "devin",
+          backendOptions: ["native"],
+        },
+      },
+    }, sourcePath),
+    /must be listed in backendOptions/,
+  );
+});
+
 test("canonicalizes delegate references and rejects invalid targets", async () => {
   const cwd = await fixture();
   const sourcePath = projectAgentsPath(cwd);

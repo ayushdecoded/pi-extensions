@@ -1,7 +1,7 @@
 import type { InlineExtension, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { AgentRole, AgentsConfig } from "../config/agents.ts";
-import type { RoleOverride } from "../config/model-overrides.ts";
+import type { AgentBackend, AgentRole, AgentsConfig } from "../config/agents.ts";
+import type { SessionRoleOverride } from "../config/model-overrides.ts";
 import type { SubagentHeadingGenerator } from "../subagent-headings.ts";
 
 export type Usage = {
@@ -29,6 +29,8 @@ export type AgentRecord = {
   role: string;
   sessionFile: string;
   createdAt: number;
+  backend?: AgentBackend;
+  backendSessionId?: string;
 };
 
 export type InvocationRecord = {
@@ -41,6 +43,8 @@ export type InvocationRecord = {
   heading?: string;
   agent: string;
   role: string;
+  /** Backend selected for this invocation; absent on older persisted entries. */
+  backend?: AgentBackend;
   task: string;
   followup: boolean;
   ordinal: number;
@@ -153,12 +157,15 @@ export type RuntimeOptions = {
   routeAccountModel?: <TApi extends Api>(model: Model<TApi>) => Model<TApi>;
   /** Name of the active preset; roles resolve through it. Defaults to default_preset. */
   activeMode?: string;
-  /** Persisted UI override (model and/or thinking) for one role in a preset, when configured. */
-  roleOverride?: (preset: string | undefined, role: string) => RoleOverride | undefined;
+  /** UI override for one role in a preset; backend is session-only. */
+  roleOverride?: (preset: string | undefined, role: string) => SessionRoleOverride | undefined;
+  /** Override the Devin executable for isolated verification. */
+  devinCommand?: string;
 };
 
 export type SubagentEvent =
   | { type: "agent.created"; agent: AgentRecord }
+  | { type: "agent.backend-session"; handle: string; sessionId: string }
   | { type: "batch.started"; batch: BatchRecord }
   | { type: "delegation.started"; call: DelegationCallRecord }
   | {

@@ -6,8 +6,16 @@ import { parse as parseYaml } from "yaml";
 
 export const AGENTS_CONFIG_FILE_NAME = "agents.yaml";
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export const AGENT_BACKENDS = ["native", "devin"] as const;
+export const DEVIN_MODEL_LABEL = "SWE-1.7 Max";
 
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+export type AgentBackend = (typeof AGENT_BACKENDS)[number];
+
+/** Human-facing model label for the backend currently executing a role. */
+export function agentModelLabel(model: string, backend?: AgentBackend): string {
+  return backend === "devin" ? DEVIN_MODEL_LABEL : model.split("/").at(-1) ?? model;
+}
 
 export type AgentsDefaults = {
   maxDepth: number;
@@ -31,6 +39,10 @@ export type AgentRole = {
   delegates: string[];
   skills?: string[];
   timeoutMinutes?: number;
+  /** Execution backend for this role. Defaults to Pi's native runtime. */
+  backend?: AgentBackend;
+  /** Backends exposed by the configuration panel for this role. */
+  backendOptions?: AgentBackend[];
   /** Vision sidecar for this role when its model is text-only. */
   image?: string;
   /** Role-specific vision sidecar instruction file. */
@@ -94,6 +106,8 @@ const ROLE_KEYS = [
   "delegates",
   "skills",
   "timeoutMinutes",
+  "backend",
+  "backendOptions",
   "image",
   "imagePrompt",
 ];
@@ -416,6 +430,13 @@ function parseRole(name: string, value: unknown, sourcePath: string): AgentRole 
     value.timeoutMinutes === undefined
       ? undefined
       : positiveInteger(value.timeoutMinutes, `Role ${name}.timeoutMinutes`);
+  const backend = value.backend === undefined ? "native" : agentBackend(value.backend, `Role ${name}.backend`);
+  const backendOptions = value.backendOptions === undefined
+    ? undefined
+    : backendArray(value.backendOptions, `Role ${name}.backendOptions`);
+  if (backendOptions && !backendOptions.includes(backend)) {
+    throw new Error(`Role ${name}.backend must be listed in backendOptions.`);
+  }
   const image = value.image === undefined ? undefined : providerModelId(value.image, `Role ${name}.image`);
   const imagePrompt =
     value.imagePrompt === undefined ? undefined : promptRef(value.imagePrompt, `Role ${name}.imagePrompt`, sourcePath);
@@ -429,6 +450,8 @@ function parseRole(name: string, value: unknown, sourcePath: string): AgentRole 
     promptFile,
     tools,
     delegates,
+    backend,
+    ...(backendOptions === undefined ? {} : { backendOptions }),
     ...(skills === undefined ? {} : { skills }),
     ...(timeoutMinutes === undefined ? {} : { timeoutMinutes }),
     ...(image === undefined ? {} : { image }),
@@ -454,6 +477,20 @@ function stringArray(value: unknown, label: string, required: boolean, caseInsen
     seen.add(key);
     result.push(item);
   }
+  return result;
+}
+
+function agentBackend(value: unknown, label: string): AgentBackend {
+  if (typeof value !== "string" || !AGENT_BACKENDS.includes(value as AgentBackend)) {
+    throw new Error(`${label} must be one of: ${AGENT_BACKENDS.join(", ")}.`);
+  }
+  return value as AgentBackend;
+}
+
+function backendArray(value: unknown, label: string): AgentBackend[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`${label} must be a non-empty array.`);
+  const result = value.map((item) => agentBackend(item, label));
+  if (new Set(result).size !== result.length) throw new Error(`${label} must not contain duplicates.`);
   return result;
 }
 

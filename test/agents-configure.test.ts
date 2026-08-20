@@ -21,8 +21,8 @@ const keybindings = new PiTuiKeybindingsManager(TUI_KEYBINDINGS) as unknown as K
 const input: AgentModelConfigureInput = {
   mode: "deep",
   roles: [
-    { name: "Atlas", model: "opencode-go/fast", thinking: "high", configuredModel: "opencode-go/fast", configuredThinking: "high" },
-    { name: "Vigil", model: "openai-codex/mini", thinking: "high", configuredModel: "openai-codex/deep", configuredThinking: "high" },
+    { name: "Atlas", model: "opencode-go/fast", thinking: "high", configuredModel: "opencode-go/fast", configuredThinking: "high", backend: "native", configuredBackend: "native", backendOptions: ["native"] },
+    { name: "Vigil", model: "openai-codex/mini", thinking: "high", configuredModel: "openai-codex/deep", configuredThinking: "high", backend: "native", configuredBackend: "native", backendOptions: ["native"] },
   ],
   scopedModels: [
     { provider: "opencode-go", providerLabel: "OpenCode Go", id: "fast", name: "Fast" },
@@ -88,6 +88,30 @@ test("selecting a model reports the canonical ID immediately", () => {
   subject.handleInput(ENTER);
   assert.deepEqual(changes, [{ role: "Atlas", change: { kind: "model", model: "openai-codex/mini" } }]);
   assert.match(plain(output(subject)), /settings · Atlas/, "panel stays open for more edits");
+});
+
+test("session scope exposes the Forge backend picker", () => {
+  const changes: Change[] = [];
+  const forgeInput: AgentModelConfigureInput = {
+    ...input,
+    roles: [{ ...input.roles[0]!, backendOptions: ["native", "devin"] }],
+  };
+  const subject = panel(forgeInput, changes);
+  subject.handleInput(ENTER); // Atlas -> settings
+  subject.handleInput(DOWN); // Thinking
+  subject.handleInput(DOWN); // Backend
+  subject.handleInput(ENTER);
+  assert.match(plain(output(subject)), /backends · Atlas/);
+  subject.handleInput(DOWN); // Devin
+  subject.handleInput(ENTER);
+  assert.deepEqual(changes, [{ role: "Atlas", change: { kind: "backend", backend: "devin" } }]);
+  assert.match(plain(output(subject)), /SWE-1\.7 Max/);
+  assert.doesNotMatch(plain(output(subject)), /fast/);
+
+  const project = panel(forgeInput, changes);
+  project.handleInput("\u0013"); // Ctrl+S -> project scope
+  project.handleInput(ENTER);
+  assert.doesNotMatch(plain(output(project)), /Backend/);
 });
 
 test("selecting a thinking level reports it immediately", () => {

@@ -32,6 +32,14 @@ export function applyEvent(state: RuntimeState, event: SubagentEvent): void {
       state.agents.set(event.agent.handle, event.agent);
       changed = true;
       break;
+    case "agent.backend-session": {
+      const agent = state.agents.get(event.handle);
+      if (agent) {
+        agent.backendSessionId = event.sessionId;
+        changed = true;
+      }
+      break;
+    }
     case "batch.started":
       state.batches.set(event.batch.id, event.batch);
       changed = true;
@@ -131,6 +139,7 @@ function isSubagentEvent(value: unknown): value is SubagentEvent {
   const type = (value as { type?: unknown }).type;
   return (
     type === "agent.created" ||
+    type === "agent.backend-session" ||
     type === "batch.started" ||
     type === "delegation.started" ||
     type === "delegation.headings" ||

@@ -1,7 +1,7 @@
 import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { isKeyRelease, Key, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { THINKING_LEVELS, type ThinkingLevel } from "../config/agents.ts";
+import { agentModelLabel, THINKING_LEVELS, type AgentBackend, type ThinkingLevel } from "../config/agents.ts";
 
 export type AgentConfigureScope = "session" | "project" | "global";
 
@@ -11,6 +11,9 @@ export type AgentModelRoleChoice = {
   thinking: string;
   configuredModel: string;
   configuredThinking: string;
+  backend: AgentBackend;
+  configuredBackend: AgentBackend;
+  backendOptions: AgentBackend[];
 };
 
 export type AgentModelChoice = {
@@ -24,8 +27,10 @@ export type AgentModelChoice = {
 export type AgentRoleConfigureChange =
   | { kind: "model"; model: string }
   | { kind: "thinking"; thinking: ThinkingLevel }
+  | { kind: "backend"; backend: AgentBackend }
   | { kind: "reset-model" }
-  | { kind: "reset-thinking" };
+  | { kind: "reset-thinking" }
+  | { kind: "reset-backend" };
 
 export type AgentModelConfigureInput = {
   /** Active preset name. Shown in the header; persistence is scoped to it. */
@@ -36,13 +41,14 @@ export type AgentModelConfigureInput = {
   allModels: AgentModelChoice[];
 };
 
-type Stage = "roles" | "settings" | "providers" | "models" | "thinking";
+type Stage = "roles" | "settings" | "providers" | "models" | "thinking" | "backends";
 type Item =
   | { kind: "role"; role: AgentModelRoleChoice }
-  | { kind: "setting"; setting: "model" | "thinking" | "reset-model" | "reset-thinking" | "done" }
+  | { kind: "setting"; setting: "model" | "thinking" | "backend" | "reset-model" | "reset-thinking" | "reset-backend" | "done" }
   | { kind: "provider"; provider: string; label: string }
   | { kind: "model"; choice: AgentModelChoice }
-  | { kind: "thinking"; level: ThinkingLevel };
+  | { kind: "thinking"; level: ThinkingLevel }
+  | { kind: "backend"; backend: AgentBackend };
 
 const PANEL_WIDTH = 84;
 
@@ -59,7 +65,7 @@ export class AgentModelConfigurePanel implements Component {
   private provider?: string;
   private all = false;
   private search = "";
-  private readonly effective = new Map<string, { model: string; thinking: string }>();
+  private readonly effective = new Map<string, { model: string; thinking: string; backend: AgentBackend }>();
 
   constructor(
     private readonly input: AgentModelConfigureInput,
@@ -71,7 +77,7 @@ export class AgentModelConfigurePanel implements Component {
     private readonly onScopeChange: (scope: AgentConfigureScope) => void = () => {},
   ) {
     this.scope = input.scope ?? "session";
-    for (const role of input.roles) this.effective.set(role.name, { model: role.model, thinking: role.thinking });
+    for (const role of input.roles) this.effective.set(role.name, { model: role.model, thinking: role.thinking, backend: role.backend });
   }
 
   handleInput(data: string): void {
@@ -79,6 +85,10 @@ export class AgentModelConfigurePanel implements Component {
     if (matchesKey(data, Key.ctrl("s"))) {
       const scopes: AgentConfigureScope[] = ["session", "project", "global"];
       this.scope = scopes[(scopes.indexOf(this.scope) + 1) % scopes.length]!;
+      if (this.scope !== "session" && this.stage === "backends") {
+        this.stage = "settings";
+        this.index = 0;
+      }
       this.onScopeChange(this.scope);
       this.tui.requestRender();
       return;
@@ -94,7 +104,7 @@ export class AgentModelConfigurePanel implements Component {
         this.stage = "providers";
         this.provider = undefined;
         this.search = "";
-      } else if (this.stage === "providers" || this.stage === "thinking") {
+      } else if (this.stage === "providers" || this.stage === "thinking" || this.stage === "backends") {
         this.stage = "settings";
       } else if (this.stage === "settings") {
         this.stage = "roles";
@@ -171,10 +181,12 @@ export class AgentModelConfigurePanel implements Component {
     if (this.stage === "settings") {
       const role = this.role;
       if (!role) return [];
-      const current = this.effective.get(role.name) ?? { model: role.model, thinking: role.thinking };
+      const current = this.effective.get(role.name) ?? { model: role.model, thinking: role.thinking, backend: role.backend };
       const items: Item[] = [{ kind: "setting", setting: "model" }, { kind: "setting", setting: "thinking" }];
+      if (this.scope === "session" && role.backendOptions.length > 1) items.push({ kind: "setting", setting: "backend" });
       if (current.model !== role.configuredModel) items.push({ kind: "setting", setting: "reset-model" });
       if (current.thinking !== role.configuredThinking) items.push({ kind: "setting", setting: "reset-thinking" });
+      if (this.scope === "session" && current.backend !== role.configuredBackend) items.push({ kind: "setting", setting: "reset-backend" });
       items.push({ kind: "setting", setting: "done" });
       return items;
     }
@@ -192,6 +204,9 @@ export class AgentModelConfigurePanel implements Component {
     if (this.stage === "thinking") {
       return THINKING_LEVELS.map((level) => ({ kind: "thinking", level }));
     }
+    if (this.stage === "backends") {
+      return (this.role?.backendOptions ?? []).map((backend) => ({ kind: "backend", backend }));
+    }
     const query = this.search.toLowerCase();
     return this.models()
       .filter((model) => model.provider === this.provider)
@@ -203,22 +218,28 @@ export class AgentModelConfigurePanel implements Component {
   private renderItem(item: Item, selected: boolean, width: number): string {
     const lead = `${selected ? this.theme.fg("accent", "→") : " "} `;
     if (item.kind === "role") {
-      const current = this.effective.get(item.role.name) ?? { model: item.role.model, thinking: item.role.thinking };
-      const overridden = current.model !== item.role.configuredModel || current.thinking !== item.role.configuredThinking;
-      const right = `${current.model.split("/").at(-1)} · ${current.thinking}`;
+      const current = this.effective.get(item.role.name) ?? { model: item.role.model, thinking: item.role.thinking, backend: item.role.backend };
+      const overridden = current.model !== item.role.configuredModel || current.thinking !== item.role.configuredThinking || current.backend !== item.role.configuredBackend;
+      const right = `${current.backend} · ${agentModelLabel(current.model, current.backend)} · ${current.thinking}`;
       return layoutRow(`${lead}${this.theme.fg("text", item.role.name)}`, this.theme.fg(overridden ? "accent" : "dim", right), width);
     }
     if (item.kind === "setting") {
       if (item.setting === "model") {
         const current = this.role ? this.effective.get(this.role.name)?.model ?? this.role.model : "";
-        return layoutRow(`${lead}${this.theme.fg("text", "Model")}`, this.theme.fg("dim", current.split("/").at(-1) ?? current), width);
+        const backend = this.role ? this.effective.get(this.role.name)?.backend ?? this.role.backend : undefined;
+        return layoutRow(`${lead}${this.theme.fg("text", "Model")}`, this.theme.fg("dim", agentModelLabel(current, backend)), width);
       }
       if (item.setting === "thinking") {
         const current = this.role ? this.effective.get(this.role.name)?.thinking ?? this.role.thinking : "";
         return layoutRow(`${lead}${this.theme.fg("text", "Thinking")}`, this.theme.fg("dim", current), width);
       }
+      if (item.setting === "backend") {
+        const current = this.role ? this.effective.get(this.role.name)?.backend ?? this.role.backend : "native";
+        return layoutRow(`${lead}${this.theme.fg("text", "Backend")}`, this.theme.fg("dim", current), width);
+      }
       if (item.setting === "reset-model") return `${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset model")}`;
       if (item.setting === "reset-thinking") return `${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset thinking")}`;
+      if (item.setting === "reset-backend") return `${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset backend")}`;
       return `${lead}${this.theme.fg("success", "✓")} ${this.theme.fg("text", "Done")}`;
     }
     if (item.kind === "provider") {
@@ -228,6 +249,10 @@ export class AgentModelConfigurePanel implements Component {
     if (item.kind === "thinking") {
       const current = this.role ? this.effective.get(this.role.name)?.thinking : undefined;
       return layoutRow(`${lead}${this.theme.fg("text", item.level)}`, this.theme.fg(item.level === current ? "accent" : "dim", item.level === current ? "selected" : ""), width);
+    }
+    if (item.kind === "backend") {
+      const current = this.role ? this.effective.get(this.role.name)?.backend : undefined;
+      return layoutRow(`${lead}${this.theme.fg("text", item.backend)}`, this.theme.fg(item.backend === current ? "accent" : "dim", item.backend === current ? "selected" : ""), width);
     }
     const current = this.role?.model === `${item.choice.provider}/${item.choice.id}`;
     return layoutRow(`${lead}${this.theme.fg("text", item.choice.name)}`, this.theme.fg(current ? "accent" : "dim", current ? "selected" : item.choice.id), width);
@@ -258,6 +283,13 @@ export class AgentModelConfigurePanel implements Component {
       } else if (item.setting === "reset-thinking") {
         this.onChange(role, { kind: "reset-thinking" });
         this.applyLocal(role, { kind: "reset-thinking" });
+      } else if (item.setting === "backend") {
+        this.stage = "backends";
+        const current = this.effective.get(role)?.backend ?? this.role!.backend;
+        this.index = Math.max(0, (this.role?.backendOptions ?? []).findIndex((backend) => backend === current));
+      } else if (item.setting === "reset-backend") {
+        this.onChange(role, { kind: "reset-backend" });
+        this.applyLocal(role, { kind: "reset-backend" });
       } else {
         this.stage = "roles";
         this.role = undefined;
@@ -282,10 +314,19 @@ export class AgentModelConfigurePanel implements Component {
       this.index = 0;
       return;
     }
+    if (item.kind === "thinking") {
+      const role = this.role?.name;
+      if (!role) return;
+      this.onChange(role, { kind: "thinking", thinking: item.level });
+      this.applyLocal(role, { kind: "thinking", thinking: item.level });
+      this.stage = "settings";
+      this.index = 0;
+      return;
+    }
     const role = this.role?.name;
     if (!role) return;
-    this.onChange(role, { kind: "thinking", thinking: item.level });
-    this.applyLocal(role, { kind: "thinking", thinking: item.level });
+    this.onChange(role, { kind: "backend", backend: item.backend });
+    this.applyLocal(role, { kind: "backend", backend: item.backend });
     this.stage = "settings";
     this.index = 0;
   }
@@ -296,8 +337,10 @@ export class AgentModelConfigurePanel implements Component {
     const configured = this.input.roles.find((candidate) => candidate.name === role);
     if (change.kind === "model") current.model = change.model;
     else if (change.kind === "thinking") current.thinking = change.thinking;
+    else if (change.kind === "backend") current.backend = change.backend;
     else if (change.kind === "reset-model") current.model = configured?.configuredModel ?? current.model;
     else if (change.kind === "reset-thinking") current.thinking = configured?.configuredThinking ?? current.thinking;
+    else if (change.kind === "reset-backend") current.backend = configured?.configuredBackend ?? current.backend;
   }
 
   private models(): AgentModelChoice[] {
@@ -322,6 +365,7 @@ export class AgentModelConfigurePanel implements Component {
     if (this.stage === "settings") return `settings · ${this.role?.name ?? "role"}`;
     if (this.stage === "providers") return `providers · ${this.role?.name ?? "role"}`;
     if (this.stage === "thinking") return `thinking · ${this.role?.name ?? "role"}`;
+    if (this.stage === "backends") return `backends · ${this.role?.name ?? "role"}`;
     return `models · ${this.models().find((model) => model.provider === this.provider)?.providerLabel ?? this.provider ?? "provider"}`;
   }
 
@@ -343,7 +387,8 @@ export async function showAgentModelConfigure(
   onChange: (role: string, change: AgentRoleConfigureChange) => void,
   onScopeChange: (scope: AgentConfigureScope) => void = () => {},
 ): Promise<void> {
-  if (ctx.mode !== "tui" || input.roles.length === 0 || input.allModels.length === 0) return;
+  const hasBackendChoice = input.roles.some((role) => role.backendOptions.length > 1);
+  if (ctx.mode !== "tui" || input.roles.length === 0 || (input.allModels.length === 0 && !hasBackendChoice)) return;
   await ctx.ui.custom(
     (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: () => void) =>
       new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done, onScopeChange),

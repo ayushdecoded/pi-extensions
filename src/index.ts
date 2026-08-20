@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
 import {
+  AGENT_BACKENDS,
   AGENTS_CONFIG_FILE_NAME,
   THINKING_LEVELS,
   agentsConfigPath,
@@ -13,6 +14,7 @@ import {
   validateAgentsFile,
 } from "./config/agents.ts";
 import type {
+  AgentBackend,
   AgentRole,
   AgentsConfig,
   AgentsConfigValidation,
@@ -131,6 +133,7 @@ function reloadState(): ReloadState {
 }
 
 export {
+  AGENT_BACKENDS,
   AGENTS_CONFIG_FILE_NAME,
   THINKING_LEVELS,
   agentsConfigPath,
@@ -145,6 +148,7 @@ export {
   validateAgentsFile,
 };
 export type {
+  AgentBackend,
   AgentRole,
   AgentsConfig,
   AgentsConfigValidation,
@@ -164,7 +168,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   const activeModeStore = createActiveModeStore();
   const modelOverrideStore = createAgentModelOverrideStore(undefined, undefined, "$global");
   let projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(), "$project");
-  let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel }>();
+  let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel; backend?: AgentBackend }>();
   let configureScope: AgentConfigureScope = "session";
   const accounts = createAccountController(pi);
   const footer = createFooterController(pi, {
@@ -533,8 +537,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             const next = { ...previous };
             if (change.kind === "model") next.model = change.model;
             else if (change.kind === "thinking") next.thinking = change.thinking;
+            else if (change.kind === "backend") next.backend = change.backend;
             else if (change.kind === "reset-model") delete next.model;
             else if (change.kind === "reset-thinking") delete next.thinking;
+            else if (change.kind === "reset-backend") delete next.backend;
             if (Object.keys(next).length) sessionOverrides.set(key, next); else sessionOverrides.delete(key);
           } else {
             const store = configureScope === "project" ? projectOverrideStore : modelOverrideStore;
@@ -543,6 +549,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
               case "thinking": store.set(configPath, mode, role.name, { thinking: change.thinking }); break;
               case "reset-model": store.set(configPath, mode, role.name, { model: undefined }); break;
               case "reset-thinking": store.set(configPath, mode, role.name, { thinking: undefined }); break;
+              case "backend":
+              case "reset-backend":
+                throw new Error("Backend selection is session-scoped.");
             }
           }
           active.refreshRoles();
@@ -561,6 +570,9 @@ export default function subagentExtension(pi: ExtensionAPI): void {
                 thinking: role.thinking,
                 configuredModel: base?.model ?? role.model,
                 configuredThinking: base?.thinking ?? role.thinking,
+                backend: role.backend ?? "native",
+                configuredBackend: base?.backend ?? role.backend ?? "native",
+                backendOptions: role.backendOptions ?? [role.backend ?? "native"],
               };
             }),
             scopedModels: projectAgentModels(ctx.scopedModels.map((item) => item.model), ctx),
@@ -733,6 +745,8 @@ function describeConfigureChange(change: AgentRoleConfigureChange): string {
     case "thinking": return `thinking: ${change.thinking}`;
     case "reset-model": return "model reset to configured";
     case "reset-thinking": return "thinking reset to configured";
+    case "backend": return `backend: ${change.backend}`;
+    case "reset-backend": return "backend reset to configured";
   }
 }
 
