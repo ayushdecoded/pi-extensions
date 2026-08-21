@@ -51,7 +51,8 @@ type Item =
   | { kind: "model"; choice: AgentModelChoice }
   | { kind: "thinking"; level: ThinkingLevel }
   | { kind: "backend"; backend: AgentBackend }
-  | { kind: "save" };
+  | { kind: "save" }
+  | { kind: "reload" };
 
 const PANEL_WIDTH = 84;
 
@@ -79,6 +80,7 @@ export class AgentModelConfigurePanel implements Component {
     private readonly done: () => void,
     private readonly onScopeChange: (scope: AgentConfigureScope) => void = () => {},
     private readonly onSaveAll: (scope: AgentConfigureScope) => void = () => {},
+    private readonly onReload: () => void = () => {},
   ) {
     this.scope = input.scope ?? "session";
     for (const role of input.roles) this.effective.set(role.name, { model: role.model, thinking: role.thinking, backend: role.backend });
@@ -136,6 +138,9 @@ export class AgentModelConfigurePanel implements Component {
         this.confirm();
         this.tui.requestRender();
       }
+      return;
+    } else if (this.stage === "roles" && data === "r") {
+      this.onReload();
       return;
     } else if (this.stage === "roles" || this.stage === "settings") {
       if (this.quickRoleAction(data)) return;
@@ -225,7 +230,7 @@ export class AgentModelConfigurePanel implements Component {
   }
 
   private items(): Item[] {
-    if (this.stage === "roles") return [...this.input.roles.map((role) => ({ kind: "role", role }) as Item), { kind: "save" }];
+    if (this.stage === "roles") return [...this.input.roles.map((role) => ({ kind: "role", role }) as Item), { kind: "save" }, { kind: "reload" }];
     if (this.stage === "settings") {
       const role = this.role;
       if (!role) return [];
@@ -267,6 +272,9 @@ export class AgentModelConfigurePanel implements Component {
     const lead = `${selected ? this.theme.fg("accent", "▸") : " "} `;
     if (item.kind === "save") {
       return layoutRow(`${lead}${this.theme.fg("success", "💾")} ${this.theme.fg(selected ? "accent" : "text", "Save all roles")}`, this.theme.fg("dim", `→ ${this.scope}`), width);
+    }
+    if (item.kind === "reload") {
+      return layoutRow(`${lead}${this.theme.fg(selected ? "accent" : "warning", "↻")} ${this.theme.fg(selected ? "accent" : "text", "Reload configs")}`, this.theme.fg("dim", "yaml + overrides"), width);
     }
     if (item.kind === "role") {
       const current = this.effective.get(item.role.name) ?? { model: item.role.model, thinking: item.role.thinking, backend: item.role.backend };
@@ -322,6 +330,10 @@ export class AgentModelConfigurePanel implements Component {
     if (!item) return;
     if (item.kind === "save") {
       this.onSaveAll(this.scope);
+      return;
+    }
+    if (item.kind === "reload") {
+      this.onReload();
       return;
     }
     if (item.kind === "role") {
@@ -441,13 +453,11 @@ export class AgentModelConfigurePanel implements Component {
     }
     if (this.stage === "roles") {
       return [
-        this.hintSegment("↑↓", "move"),
-        this.hintSegment("↵", "select"),
+        this.hintSegment("↑↓↵", "select"),
         this.hintSegment("1-9", "jump"),
-        this.hintSegment("m", "model"),
-        this.hintSegment("t", "thinking"),
-        this.hintSegment("←→", `scope: ${this.scope}`),
-        this.hintSegment("tab", this.all ? "scoped" : "all"),
+        this.hintSegment("m/t", "quick edit"),
+        this.hintSegment("←→", "scope"),
+        this.hintSegment("r", "reload"),
         this.hintSegment("esc", "close"),
       ].join(this.theme.fg("border", " · "));
     }
@@ -475,12 +485,13 @@ export async function showAgentModelConfigure(
   onChange: (role: string, change: AgentRoleConfigureChange) => void,
   onScopeChange: (scope: AgentConfigureScope) => void = () => {},
   onSaveAll: (scope: AgentConfigureScope) => void = () => {},
+  onReload: () => void = () => {},
 ): Promise<void> {
   const hasBackendChoice = input.roles.some((role) => role.backendOptions.length > 1);
   if (ctx.mode !== "tui" || input.roles.length === 0 || (input.allModels.length === 0 && !hasBackendChoice)) return;
   await ctx.ui.custom(
     (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: () => void) =>
-      new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done, onScopeChange, onSaveAll),
+      new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done, onScopeChange, onSaveAll, onReload),
     { overlay: true, overlayOptions: { width: PANEL_WIDTH, minWidth: 30, maxHeight: "80%", anchor: "center", margin: 2 } },
   );
 }

@@ -595,6 +595,28 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             active.refreshRoles();
             ctx.ui.notify(`Saved ${saved} role${saved === 1 ? "" : "s"} to ${scope} config`, "info");
           },
+          () => {
+            try {
+              const fresh = loadAgentsConfig({ cwd: ctx.cwd });
+              if (fresh.path === projectAgentsPath(ctx.cwd) && !ctx.isProjectTrusted()) {
+                throw new Error("Project agents.yaml is disabled because this project is not trusted.");
+              }
+              currentConfig = fresh;
+              active.rebindForReload({ config: fresh });
+              const mode = active.activeMode;
+              try {
+                active.setActiveMode(mode);
+              } catch {
+                active.setActiveMode(undefined);
+              }
+              // Pick up models.json/auth edits too; in-flight children keep theirs.
+              active.resetModelRuntime();
+              active.refreshRoles();
+              ctx.ui.notify(`Reloaded configs from ${fresh.path}`, "info");
+            } catch (error) {
+              notifyError(ctx, error);
+            }
+          },
         );
         return;
       }

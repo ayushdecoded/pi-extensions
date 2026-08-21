@@ -208,7 +208,7 @@ test("the save row flushes all roles at the current scope and keeps the panel op
   const subject = panelWithSave(saved, input, changes);
   assert.match(plain(output(subject)), /Save all roles\s+→ session/);
   assert.match(plain(output(subject)), /1-9 jump/);
-  assert.match(plain(output(subject)), /m model.*t thinking/);
+  assert.match(plain(output(subject)), /m\/t quick edit/);
   subject.handleInput(DOWN); // Vigil
   subject.handleInput(DOWN); // Save all roles
   subject.handleInput(ENTER);
@@ -312,4 +312,29 @@ test("models without configured auth stay visible but marked", () => {
   subject.handleInput(ENTER);
   assert.match(plain(output(subject)), /Fast\s+✓ selected/, "authenticated models render unmarked");
   assert.doesNotMatch(plain(output(subject)), /no auth/, "authenticated models are not marked");
+});
+
+test("the reload row and r key re-read configs without closing", () => {
+  const reloaded: boolean[] = [];
+  const subject = new AgentModelConfigurePanel(
+    input,
+    tui,
+    theme,
+    keybindings,
+    () => {},
+    () => {},
+    () => {},
+    () => {},
+    () => reloaded.push(true),
+  );
+  assert.match(plain(output(subject)), /Reload configs\s+yaml \+ overrides/);
+  assert.match(plain(output(subject)), /r reload/);
+  subject.handleInput("r"); // direct shortcut
+  assert.deepEqual(reloaded, [true]);
+  subject.handleInput(DOWN); // Vigil
+  subject.handleInput(DOWN); // Save all roles
+  subject.handleInput(DOWN); // Reload configs
+  subject.handleInput(ENTER);
+  assert.deepEqual(reloaded, [true, true]);
+  assert.match(plain(output(subject)), /roles/, "panel stays open after reloading");
 });
