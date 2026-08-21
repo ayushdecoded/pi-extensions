@@ -576,10 +576,25 @@ export default function subagentExtension(pi: ExtensionAPI): void {
               };
             }),
             scopedModels: projectAgentModels(ctx.scopedModels.map((item) => item.model), ctx),
-            allModels: projectAgentModels(ctx.modelRegistry.getAvailable(), ctx),
+            allModels: projectAgentModels(ctx.modelRegistry.getAll(), ctx),
           },
           applyChange,
           (scope) => { configureScope = scope; },
+          (scope) => {
+            let saved = 0;
+            for (const role of active.activeRoles) {
+              if (!configured.some((candidate) => candidate.name === role.name)) continue;
+              if (scope === "session") {
+                sessionOverrides.set(`${mode ?? "$default"}\u0000${role.name}`, { model: role.model, thinking: role.thinking });
+              } else {
+                const store = scope === "project" ? projectOverrideStore : modelOverrideStore;
+                store.set(configPath, mode, role.name, { model: role.model, thinking: role.thinking });
+              }
+              saved += 1;
+            }
+            active.refreshRoles();
+            ctx.ui.notify(`Saved ${saved} role${saved === 1 ? "" : "s"} to ${scope} config`, "info");
+          },
         );
         return;
       }
@@ -763,6 +778,9 @@ function projectAgentModels(
   models: ReadonlyArray<{ provider: string; id: string; name: string }>,
   ctx: ExtensionContext,
 ): AgentModelChoice[] {
+  const available = new Set(
+    ctx.modelRegistry.getAvailable().map((model) => `${canonicalProviderId(model.provider)}/${model.id}`),
+  );
   const choices = new Map<string, AgentModelChoice>();
   for (const model of models) {
     const provider = canonicalProviderId(model.provider);
@@ -773,6 +791,7 @@ function projectAgentModels(
       providerLabel: ctx.modelRegistry.getProviderDisplayName(provider),
       id: model.id,
       name: model.name || model.id,
+      ...(available.has(key) ? {} : { available: false }),
     });
   }
   return [...choices.values()];

@@ -21,6 +21,8 @@ export type AgentModelChoice = {
   providerLabel: string;
   id: string;
   name: string;
+  /** False when the provider has no configured credentials; the model still shows, marked. */
+  available?: boolean;
 };
 
 /** One confirmed edit. Callers persist it immediately. */
@@ -48,7 +50,8 @@ type Item =
   | { kind: "provider"; provider: string; label: string }
   | { kind: "model"; choice: AgentModelChoice }
   | { kind: "thinking"; level: ThinkingLevel }
-  | { kind: "backend"; backend: AgentBackend };
+  | { kind: "backend"; backend: AgentBackend }
+  | { kind: "save" };
 
 const PANEL_WIDTH = 84;
 
@@ -75,6 +78,7 @@ export class AgentModelConfigurePanel implements Component {
     private readonly onChange: (role: string, change: AgentRoleConfigureChange) => void,
     private readonly done: () => void,
     private readonly onScopeChange: (scope: AgentConfigureScope) => void = () => {},
+    private readonly onSaveAll: (scope: AgentConfigureScope) => void = () => {},
   ) {
     this.scope = input.scope ?? "session";
     for (const role of input.roles) this.effective.set(role.name, { model: role.model, thinking: role.thinking, backend: role.backend });
@@ -82,15 +86,9 @@ export class AgentModelConfigurePanel implements Component {
 
   handleInput(data: string): void {
     if (isKeyRelease(data)) return;
-    if (matchesKey(data, Key.ctrl("s"))) {
-      const scopes: AgentConfigureScope[] = ["session", "project", "global"];
-      this.scope = scopes[(scopes.indexOf(this.scope) + 1) % scopes.length]!;
-      if (this.scope !== "session" && this.stage === "backends") {
-        this.stage = "settings";
-        this.index = 0;
-      }
-      this.onScopeChange(this.scope);
-      this.tui.requestRender();
+    if (matchesKey(data, Key.ctrl("s")) || matchesKey(data, Key.left) || matchesKey(data, Key.right)) {
+      const delta = matchesKey(data, Key.left) ? -1 : 1;
+      this.cycleScope(delta);
       return;
     }
     if (matchesKey(data, Key.tab)) {
@@ -130,6 +128,17 @@ export class AgentModelConfigurePanel implements Component {
         this.tui.requestRender();
         return;
       }
+    } else if (/^[1-9]$/.test(data)) {
+      // Digits type into the model filter above; elsewhere they jump + confirm.
+      const target = Number(data) - 1;
+      if (target < this.items().length) {
+        this.index = target;
+        this.confirm();
+        this.tui.requestRender();
+      }
+      return;
+    } else if (this.stage === "roles" || this.stage === "settings") {
+      if (this.quickRoleAction(data)) return;
     }
 
     const count = this.items().length;
@@ -155,7 +164,8 @@ export class AgentModelConfigurePanel implements Component {
     const start = windowStart(this.index, items.length, bodyHeight);
     const scope = this.scopeIsEffective() ? (this.all ? "all" : "scoped") : "all";
     const modePart = this.input.mode ? `mode: ${this.input.mode}` : undefined;
-    const headerRight = [modePart, `scope: ${this.scope}`, `${scope} models`].filter(Boolean).join(" · ");
+    const scopeBadge = this.theme.fg(this.scope === "session" ? "dim" : "warning", `scope: ${this.scope}`);
+    const headerRight = [modePart ? this.theme.fg("dim", modePart) : undefined, scopeBadge, this.theme.fg("dim", `${scope} models`)].filter(Boolean).join(this.theme.fg("border", " · "));
     const lines = [""];
     lines.push(joinSides(this.theme.fg("accent", "Configure subagents"), this.theme.fg("dim", headerRight), panelWidth));
     lines.push("");
@@ -176,8 +186,46 @@ export class AgentModelConfigurePanel implements Component {
 
   invalidate(): void {}
 
+  private cycleScope(delta: 1 | -1): void {
+    const scopes: AgentConfigureScope[] = ["session", "project", "global"];
+    this.scope = scopes[(scopes.indexOf(this.scope) + delta + scopes.length) % scopes.length]!;
+    if (this.scope !== "session" && this.stage === "backends") {
+      this.stage = "settings";
+      this.index = 0;
+    }
+    this.onScopeChange(this.scope);
+    this.tui.requestRender();
+  }
+
+  /** m/t/b act on the highlighted role straight from the roles list. */
+  private quickRoleAction(data: string): boolean {
+    const name = this.stage === "roles"
+      ? this.items()[this.index]?.kind === "role" ? (this.items()[this.index] as { role: AgentModelRoleChoice }).role.name : undefined
+      : this.role?.name;
+    if (!name) return false;
+    const role = this.input.roles.find((candidate) => candidate.name === name);
+    if (!role) return false;
+    if (data === "m") {
+      this.role = role;
+      this.stage = "providers";
+    } else if (data === "t") {
+      this.role = role;
+      this.stage = "thinking";
+      const current = this.effective.get(name)?.thinking ?? role.thinking;
+      this.index = Math.max(0, THINKING_LEVELS.findIndex((level) => level === current));
+    } else if (data === "b" && this.scope === "session" && role.backendOptions.length > 1) {
+      this.role = role;
+      this.stage = "backends";
+      const current = this.effective.get(name)?.backend ?? role.backend;
+      this.index = Math.max(0, role.backendOptions.findIndex((backend) => backend === current));
+    } else {
+      return false;
+    }
+    return true;
+  }
+
   private items(): Item[] {
-    if (this.stage === "roles") return this.input.roles.map((role) => ({ kind: "role", role }));
+    if (this.stage === "roles") return [...this.input.roles.map((role) => ({ kind: "role", role }) as Item), { kind: "save" }];
     if (this.stage === "settings") {
       const role = this.role;
       if (!role) return [];
@@ -216,12 +264,17 @@ export class AgentModelConfigurePanel implements Component {
   }
 
   private renderItem(item: Item, selected: boolean, width: number): string {
-    const lead = `${selected ? this.theme.fg("accent", "→") : " "} `;
+    const lead = `${selected ? this.theme.fg("accent", "▸") : " "} `;
+    if (item.kind === "save") {
+      return layoutRow(`${lead}${this.theme.fg("success", "💾")} ${this.theme.fg(selected ? "accent" : "text", "Save all roles")}`, this.theme.fg("dim", `→ ${this.scope}`), width);
+    }
     if (item.kind === "role") {
       const current = this.effective.get(item.role.name) ?? { model: item.role.model, thinking: item.role.thinking, backend: item.role.backend };
       const overridden = current.model !== item.role.configuredModel || current.thinking !== item.role.configuredThinking || current.backend !== item.role.configuredBackend;
+      const dot = overridden ? `${this.theme.fg("warning", "●")} ` : "";
+      const name = this.theme.fg(selected ? "accent" : "text", item.role.name);
       const right = `${current.backend} · ${agentModelLabel(current.model, current.backend)} · ${current.thinking}`;
-      return layoutRow(`${lead}${this.theme.fg("text", item.role.name)}`, this.theme.fg(overridden ? "accent" : "dim", right), width);
+      return layoutRow(`${lead}${dot}${name}`, this.theme.fg(overridden ? "accent" : "dim", right), width);
     }
     if (item.kind === "setting") {
       if (item.setting === "model") {
@@ -248,19 +301,29 @@ export class AgentModelConfigurePanel implements Component {
     }
     if (item.kind === "thinking") {
       const current = this.role ? this.effective.get(this.role.name)?.thinking : undefined;
-      return layoutRow(`${lead}${this.theme.fg("text", item.level)}`, this.theme.fg(item.level === current ? "accent" : "dim", item.level === current ? "selected" : ""), width);
+      const chosen = item.level === current;
+      return layoutRow(`${lead}${this.theme.fg(chosen ? "accent" : "text", item.level)}`, this.theme.fg(chosen ? "success" : "dim", chosen ? "✓ selected" : ""), width);
     }
     if (item.kind === "backend") {
       const current = this.role ? this.effective.get(this.role.name)?.backend : undefined;
-      return layoutRow(`${lead}${this.theme.fg("text", item.backend)}`, this.theme.fg(item.backend === current ? "accent" : "dim", item.backend === current ? "selected" : ""), width);
+      const chosen = item.backend === current;
+      return layoutRow(`${lead}${this.theme.fg(chosen ? "accent" : "text", item.backend)}`, this.theme.fg(chosen ? "success" : "dim", chosen ? "✓ selected" : ""), width);
     }
     const current = this.role?.model === `${item.choice.provider}/${item.choice.id}`;
-    return layoutRow(`${lead}${this.theme.fg("text", item.choice.name)}`, this.theme.fg(current ? "accent" : "dim", current ? "selected" : item.choice.id), width);
+    const noAuth = item.choice.available === false;
+    const right = current ? "✓ selected" : noAuth ? `${item.choice.id} · no auth` : item.choice.id;
+    const rightColor = current ? "success" : noAuth ? "warning" : "dim";
+    const nameColor = current ? "accent" : noAuth ? "dim" : "text";
+    return layoutRow(`${lead}${this.theme.fg(nameColor, item.choice.name)}`, this.theme.fg(rightColor, right), width);
   }
 
   private confirm(): void {
     const item = this.items()[this.index];
     if (!item) return;
+    if (item.kind === "save") {
+      this.onSaveAll(this.scope);
+      return;
+    }
     if (item.kind === "role") {
       this.role = item.role;
       this.stage = "settings";
@@ -370,10 +433,35 @@ export class AgentModelConfigurePanel implements Component {
   }
 
   private hint(): string {
-    const base = `↑↓ select · ↵ confirm · Ctrl+S scope: ${this.scope} · Tab ${this.all ? "scoped" : "all"} · esc ${this.stage === "roles" ? "cancel" : "back"}`;
-    if (this.stage === "models") return `${this.search ? `filter: ${this.search} · ` : ""}${base}${this.search ? "" : " · type to filter"}`;
-    if (this.stage === "settings") return `${base} · ↑↓ select · ↵ edit · esc back`;
-    return base;
+    if (this.stage === "models") {
+      const filter = this.search
+        ? [this.hintSegment(`filter: ${this.search}`, "")]
+        : [this.hintSegment("type", "to filter")];
+      return [...filter, this.hintSegment("↑↓", "move"), this.hintSegment("↵", "select"), this.hintSegment("tab", this.all ? "scoped" : "all"), this.hintSegment("esc", "back")].join(this.theme.fg("border", " · "));
+    }
+    if (this.stage === "roles") {
+      return [
+        this.hintSegment("↑↓", "move"),
+        this.hintSegment("↵", "select"),
+        this.hintSegment("1-9", "jump"),
+        this.hintSegment("m", "model"),
+        this.hintSegment("t", "thinking"),
+        this.hintSegment("←→", `scope: ${this.scope}`),
+        this.hintSegment("tab", this.all ? "scoped" : "all"),
+        this.hintSegment("esc", "close"),
+      ].join(this.theme.fg("border", " · "));
+    }
+    const segments = [this.hintSegment("↑↓", "move"), this.hintSegment("↵", "select"), this.hintSegment("←→", `scope: ${this.scope}`)];
+    if (this.stage === "settings") {
+      segments.push(this.hintSegment("m", "model"), this.hintSegment("t", "thinking"));
+      if (this.scope === "session" && (this.role?.backendOptions.length ?? 0) > 1) segments.push(this.hintSegment("b", "backend"));
+    }
+    segments.push(this.hintSegment("esc", "back"));
+    return segments.join(this.theme.fg("border", " · "));
+  }
+
+  private hintSegment(key: string, label: string): string {
+    return label ? `${this.theme.fg("accent", key)} ${this.theme.fg("dim", label)}` : this.theme.fg("accent", key);
   }
 
   private cancelled(data: string): boolean {
@@ -386,12 +474,13 @@ export async function showAgentModelConfigure(
   input: AgentModelConfigureInput,
   onChange: (role: string, change: AgentRoleConfigureChange) => void,
   onScopeChange: (scope: AgentConfigureScope) => void = () => {},
+  onSaveAll: (scope: AgentConfigureScope) => void = () => {},
 ): Promise<void> {
   const hasBackendChoice = input.roles.some((role) => role.backendOptions.length > 1);
   if (ctx.mode !== "tui" || input.roles.length === 0 || (input.allModels.length === 0 && !hasBackendChoice)) return;
   await ctx.ui.custom(
     (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: () => void) =>
-      new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done, onScopeChange),
+      new AgentModelConfigurePanel(input, tui, theme, keybindings, onChange, done, onScopeChange, onSaveAll),
     { overlay: true, overlayOptions: { width: PANEL_WIDTH, minWidth: 30, maxHeight: "80%", anchor: "center", margin: 2 } },
   );
 }

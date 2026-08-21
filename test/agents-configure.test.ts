@@ -188,3 +188,128 @@ test("showAgentModelConfigure requires TUI, roles, and available models", async 
   assert.equal(await showAgentModelConfigure({ mode: "tui", ui: { custom() {} } }, { ...input, roles: [] }, noop), undefined);
   assert.equal(await showAgentModelConfigure({ mode: "tui", ui: { custom() {} } }, { ...input, allModels: [] }, noop), undefined);
 });
+
+function panelWithSave(saved: string[], source = input, changes: Change[] = []) {
+  return new AgentModelConfigurePanel(
+    source,
+    tui,
+    theme,
+    keybindings,
+    (role, change) => changes.push({ role, change }),
+    () => {},
+    () => {},
+    (scope) => saved.push(scope),
+  );
+}
+
+test("the save row flushes all roles at the current scope and keeps the panel open", () => {
+  const changes: Change[] = [];
+  const saved: string[] = [];
+  const subject = panelWithSave(saved, input, changes);
+  assert.match(plain(output(subject)), /Save all roles\s+→ session/);
+  assert.match(plain(output(subject)), /1-9 jump/);
+  assert.match(plain(output(subject)), /m model.*t thinking/);
+  subject.handleInput(DOWN); // Vigil
+  subject.handleInput(DOWN); // Save all roles
+  subject.handleInput(ENTER);
+  assert.deepEqual(saved, ["session"]);
+  assert.deepEqual(changes, [], "saving does not emit per-role changes");
+  assert.match(plain(output(subject)), /roles/, "panel stays open after saving");
+});
+
+test("save targets the scope chosen with Ctrl+S", () => {
+  const saved: string[] = [];
+  const subject = panelWithSave(saved);
+  subject.handleInput("\u0013"); // Ctrl+S -> project
+  subject.handleInput("\u0013"); // Ctrl+S -> global
+  assert.match(plain(output(subject)), /Save all roles\s+→ global/);
+  subject.handleInput(DOWN);
+  subject.handleInput(DOWN);
+  subject.handleInput(ENTER);
+  assert.deepEqual(saved, ["global"]);
+});
+
+const RIGHT = "\x1b[C";
+const LEFT = "\x1b[D";
+
+function panelWithHooks(saved: string[], scopes: string[], source = input) {
+  return new AgentModelConfigurePanel(
+    source,
+    tui,
+    theme,
+    keybindings,
+    () => {},
+    () => {},
+    (scope) => scopes.push(scope),
+    (scope) => saved.push(scope),
+  );
+}
+
+test("arrow keys cycle the scope in both directions", () => {
+  const saved: string[] = [];
+  const scopes: string[] = [];
+  const subject = panelWithHooks(saved, scopes);
+  assert.match(plain(output(subject)), /scope: session/);
+  subject.handleInput(RIGHT);
+  assert.match(plain(output(subject)), /scope: project/);
+  subject.handleInput(RIGHT);
+  assert.match(plain(output(subject)), /scope: global/);
+  subject.handleInput(RIGHT); // wraps to session
+  assert.match(plain(output(subject)), /scope: session/);
+  subject.handleInput(LEFT); // back to global
+  assert.match(plain(output(subject)), /scope: global/);
+  assert.deepEqual(scopes, ["project", "global", "session", "global"]);
+  subject.handleInput(DOWN);
+  subject.handleInput(DOWN);
+  subject.handleInput(ENTER);
+  assert.deepEqual(saved, ["global"]);
+});
+
+test("number keys jump to and confirm an item", () => {
+  const changes: Change[] = [];
+  const subject = panel(input, changes);
+  subject.handleInput("2"); // Vigil -> settings
+  assert.match(plain(output(subject)), /settings · Vigil/);
+  subject.handleInput(ESCAPE); // back to roles
+  subject.handleInput("3"); // save row fires without changing selection first
+  assert.match(plain(output(subject)), /roles/, "still open after saving");
+});
+
+test("m and t act on the highlighted role straight from the roles list", () => {
+  const changes: Change[] = [];
+  const subject = panel(input, changes);
+  subject.handleInput(DOWN); // highlight Vigil
+  subject.handleInput("t"); // thinking picker for Vigil
+  assert.match(plain(output(subject)), /thinking · Vigil/);
+  subject.handleInput(DOWN); // high -> xhigh
+  subject.handleInput(ENTER);
+  assert.deepEqual(changes, [{ role: "Vigil", change: { kind: "thinking", thinking: "xhigh" } }]);
+
+  const modelChanges: Change[] = [];
+  const other = panel(input, modelChanges);
+  other.handleInput("1"); // Atlas -> settings via number jump
+  other.handleInput("m"); // model picker for Atlas
+  assert.match(plain(output(other)), /providers · Atlas/);
+});
+
+test("models without configured auth stay visible but marked", () => {
+  const withUnauthed: AgentModelConfigureInput = {
+    ...input,
+    allModels: [
+      { provider: "opencode-go", providerLabel: "OpenCode Go", id: "fast", name: "Fast", available: true },
+      { provider: "anthropic", providerLabel: "Anthropic", id: "claude-x", name: "Claude X", available: false },
+    ],
+  };
+  const subject = panel(withUnauthed);
+  subject.handleInput(ENTER); // Atlas -> settings
+  subject.handleInput(ENTER); // Model -> providers
+  subject.handleInput(TAB); // all models
+  subject.handleInput(ENTER); // Anthropic sorts first -> models
+  const rendered = plain(output(subject));
+  assert.match(rendered, /claude-x · no auth/);
+  subject.handleInput(ESCAPE);
+  subject.handleInput(DOWN); // OpenCode Go
+  subject.handleInput(ENTER);
+  assert.match(plain(output(subject)), /Fast\s+✓ selected/, "authenticated models render unmarked");
+  assert.doesNotMatch(plain(output(subject)), /no auth/, "authenticated models are not marked");
+});
