@@ -7,6 +7,7 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import type { Component, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { codexAuth, codexAuthHeaders } from "./codex-auth.ts";
+import { pasteDictated } from "./dictation-target.ts";
 import { playerctlMediaPause, type MediaPause } from "./media-pause.ts";
 
 const TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe";
@@ -16,6 +17,8 @@ const USER_AGENT = "Codex Desktop/26.429.30905 (Linux; x64)";
 const REQUEST_TIMEOUT_MS = 60_000;
 const PREVIEW_LENGTH = 120;
 const WIDGET_KEY = "voice-input";
+/** Shared shortcut identity for voice input and composer ask mode. */
+export const VOICE_INPUT_SHORTCUT = "ctrl+shift+r" as const;
 
 const BAR_HEIGHTS = "▁▂▃▄▅▆▇█";
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -204,7 +207,9 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
         const audio = await readFile(current.filePath);
         const text = await transcribeAudio(audio, "audio/wav", ctx);
         if (text) {
-          ctx.ui.pasteToEditor(text);
+          // Lands in the focused component's input when one registered a sink
+          // (e.g. the ask panel); otherwise the prompt editor.
+          pasteDictated(ctx, text);
           ctx.ui.notify(`🎙 ${preview(text)}`, "info");
         } else {
           ctx.ui.notify("Voice input caught no speech.", "warning");
@@ -260,10 +265,10 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
   return { toggle, transcribeAudio };
 }
 
-export function registerVoiceInput(pi: ExtensionAPI, dependencies: VoiceInputDependencies = {}): void {
+export function registerVoiceInput(pi: ExtensionAPI, dependencies: VoiceInputDependencies = {}): { toggle: (ctx: ExtensionContext) => Promise<VoiceToggleResult> } {
   const voice = createVoiceInput(dependencies);
   const toggle = (ctx: ExtensionContext) => void voice.toggle(ctx);
-  pi.registerShortcut("ctrl+shift+r", {
+  pi.registerShortcut(VOICE_INPUT_SHORTCUT, {
     description: "Toggle voice input (record, then transcribe into the prompt)",
     handler: toggle,
   });
@@ -271,6 +276,7 @@ export function registerVoiceInput(pi: ExtensionAPI, dependencies: VoiceInputDep
     description: "Toggle voice input recording/transcription",
     handler: async (_args, ctx) => { await voice.toggle(ctx); },
   });
+  return voice;
 }
 
 /** Kill a recorder left over from a previous Pi session (crashed mid-recording). */

@@ -72,6 +72,7 @@ import { createPainterTool } from "./painter.ts";
 import { createAccountController, type AccountController } from "./accounts/controller.ts";
 import { registerAccountCommands } from "./accounts/commands.ts";
 import { registerVoiceInput } from "./voice-input.ts";
+import { createAskTool } from "./ask/index.ts";
 import registerWebSearch from "./web-search/index.ts";
 import { canonicalProviderId } from "./accounts/providers.ts";
 
@@ -230,7 +231,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   pi.registerMessageRenderer(BACKGROUND_SUBAGENT_RESULT_TYPE, renderBackgroundBatchMessage);
   registerThinkingShortcuts(pi);
   registerAccountCommands(pi, accounts);
-  registerVoiceInput(pi, { codexProvider: () => accounts.selectedProviderId("openai-codex") });
+  const voice = registerVoiceInput(pi, { codexProvider: () => accounts.selectedProviderId("openai-codex") });
   registerAutoRename(pi);
   registerSaveMarkdown(pi);
   registerHandoffCommand(pi);
@@ -239,6 +240,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerProactiveCompaction(pi);
   registerWebSearch(pi);
   pi.registerTool(createPainterTool({ codexProvider: () => accounts.selectedProviderId("openai-codex") }));
+  // Dictation rides the same voice pipeline: while the ask dialog owns focus,
+  // its hotkey triggers a toggle and transcripts land in the focused input.
+  pi.registerTool(createAskTool({
+    startDictation: (ctx) => {
+      voice.toggle(ctx).catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
+    },
+  }));
 
   // The main session's read tool also rides the vision hook: when the main model
   // is text-only and reads an image, the sidecar description is appended to the
