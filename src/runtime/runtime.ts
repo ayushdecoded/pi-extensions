@@ -716,6 +716,14 @@ export class SubagentRuntime {
       try {
         await session.prompt(resolved.task);
         await session.waitForIdle();
+        if (endsWithEmptyFinal(session)) {
+          // A turn that stops without any text is a silent/empty completion
+          // (e.g. provider glitch returning content: []). The invocation result
+          // IS the final report, so ask once for it before treating this as a
+          // failure instead of recording a fake "complete" with no output.
+          await session.prompt(EMPTY_FINAL_REPROMPT);
+          await session.waitForIdle();
+        }
         activeTimeout?.pause();
       } finally {
         unsubscribe();
@@ -739,6 +747,15 @@ export class SubagentRuntime {
           usage,
           output || undefined,
           final.errorMessage ?? `Agent stopped with ${final.stopReason}.`,
+        );
+      }
+      if ((final.stopReason === "stop" || final.stopReason === "length") && output === "") {
+        return this.finish(
+          invocation.id,
+          "failed",
+          usage,
+          undefined,
+          "Agent finished without producing a final response (empty completion). Resume or re-delegate the task to continue.",
         );
       }
       return this.finish(invocation.id, "complete", usage, output);
@@ -1097,6 +1114,24 @@ function statsUsage(stats: SessionStats): Usage {
     total: stats.tokens.total,
     cost: stats.cost,
   };
+}
+
+/** Sent after a turn that produced no text; shared by the root-session guard. */
+export const EMPTY_FINAL_REPROMPT =
+  "Your previous turn ended without a final response. Reply now with your final report for the task you were given: state what you completed, what you verified, and anything left unfinished. Do not start new work unless the task is incomplete.";
+
+/**
+ * True when the session's last assistant turn stopped without producing any text.
+ * Covers both clean stops that arrive empty (provider glitch) and "length" stops
+ * where hidden reasoning consumed the whole budget and content came back empty.
+ */
+export function endsWithEmptyFinal(session: { messages: readonly unknown[] }): boolean {
+  const final = lastAssistant(session.messages);
+  return (
+    final !== undefined &&
+    (final.stopReason === "stop" || final.stopReason === "length") &&
+    assistantText(final) === ""
+  );
 }
 
 function lastAssistant(messages: readonly unknown[]): AssistantMessage | undefined {

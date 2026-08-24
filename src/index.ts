@@ -42,6 +42,7 @@ import {
   reconcileBackgroundRuns,
 } from "./background-runs/registry.ts";
 import { createVisionHookHandler } from "./runtime/vision-hook.ts";
+import { registerEmptyFinalGuard } from "./empty-final-guard.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
 import { registerSaveMarkdown } from "./save-md.ts";
@@ -183,6 +184,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     footer.requestRender();
   });
   registerPackSystemPrompt(pi);
+  registerEmptyFinalGuard(pi);
 
   // Background terminal runs: detached processes launched through the bash tool,
   // tracked per session, killed on quit (left running on reload), listed via /ps.
@@ -243,6 +245,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   // Dictation rides the same voice pipeline: while the ask dialog owns focus,
   // its hotkey triggers a toggle and transcripts land in the focused input.
   pi.registerTool(createAskTool({
+    herdrEvents: pi.events,
     startDictation: (ctx) => {
       voice.toggle(ctx).catch((error) => ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"));
     },
