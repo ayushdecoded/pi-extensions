@@ -39,7 +39,7 @@ test("an empty stop completion triggers exactly one automatic follow-up", async 
   const h = harness();
   await h.settle([userEntry("do the thing"), assistant("stop", [])]);
   assert.equal(h.sent.length, 1);
-  assert.match(h.sent[0]!.content, /final report/i);
+  assert.match(h.sent[0]!.content, /continue your current task/i);
   assert.equal(h.sent[0]!.options.deliverAs, "followUp");
 });
 

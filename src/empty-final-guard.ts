@@ -7,9 +7,9 @@ import { EMPTY_FINAL_REPROMPT } from "./runtime/runtime.ts";
  * stopReason "stop" or "length" but no text content at all. The agent loop
  * treats that as a finished turn and pi just goes idle mid-conversation.
  *
- * When the settled turn is empty, send one automatic follow-up asking for the
- * final report. If the retry comes back empty too, surface a visible warning
- * instead of looping (or silently stalling). Native subagent sessions are
+ * When the settled turn is empty, send one automatic continuation prompt so
+ * the model picks its work back up. If the retry comes back empty too,
+ * surface a visible warning instead of looping (or silently stalling). Native subagent sessions are
  * skipped — SubagentRuntime.runInvocation has the equivalent guard built in,
  * and double-firing would queue two recovery prompts.
  */

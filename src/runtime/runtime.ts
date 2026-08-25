@@ -718,9 +718,10 @@ export class SubagentRuntime {
         await session.waitForIdle();
         if (endsWithEmptyFinal(session)) {
           // A turn that stops without any text is a silent/empty completion
-          // (e.g. provider glitch returning content: []). The invocation result
-          // IS the final report, so ask once for it before treating this as a
-          // failure instead of recording a fake "complete" with no output.
+          // (e.g. provider glitch returning content: []). The task may simply
+          // be unfinished, so send one continuation prompt instead of asking
+          // for a report (which would force a premature wrap-up) or treating
+          // this as a failure.
           await session.prompt(EMPTY_FINAL_REPROMPT);
           await session.waitForIdle();
         }
@@ -1118,7 +1119,7 @@ function statsUsage(stats: SessionStats): Usage {
 
 /** Sent after a turn that produced no text; shared by the root-session guard. */
 export const EMPTY_FINAL_REPROMPT =
-  "Your previous turn ended without a final response. Reply now with your final report for the task you were given: state what you completed, what you verified, and anything left unfinished. Do not start new work unless the task is incomplete.";
+  "Your previous turn ended without any output. Continue your current task from where you left off; do not summarize or report unless the work is genuinely complete.";
 
 /**
  * True when the session's last assistant turn stopped without producing any text.
