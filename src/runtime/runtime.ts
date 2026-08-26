@@ -222,11 +222,12 @@ export class SubagentRuntime {
     requests: SubagentRequest[],
     signal?: AbortSignal,
     onProgress?: (result: BatchResult) => void,
+    detached = true,
   ): BackgroundBatchLaunch {
     this.validateBatch(requests);
     const batchId = this.nextBatchId();
     const createdAt = Date.now();
-    this.record({ type: "batch.started", batch: { id: batchId, createdAt } });
+    this.record({ type: "batch.started", batch: { id: batchId, createdAt, ...(detached ? { detached: true } : {}) } });
     const callId = randomUUID();
     this.record({ type: "delegation.started", call: { id: callId, batchId, createdAt } });
     const progress = () => onProgress?.(this.snapshotBatch(batchId, undefined, createdAt));
@@ -293,6 +294,35 @@ export class SubagentRuntime {
   }
 
   /**
+   * Results of detached root batches whose invocations have all settled,
+   * oldest first. Used to re-deliver follow-up results that were queued while
+   * the parent was streaming and then lost — for example when the turn was
+   * interrupted before the host drained its follow-up queue.
+   */
+  settledDetachedBatches(): Array<{ batchId: string; result: BatchResult }> {
+    const settled: Array<{ batchId: string; createdAt: number; result: BatchResult }> = [];
+    for (const batch of this.state.batches.values()) {
+      if (!batch.detached) continue;
+      const invocations = [...this.state.invocations.values()].filter((item) => item.batchId === batch.id);
+      if (
+        invocations.length === 0 ||
+        invocations.some((item) => item.status === "queued" || item.status === "running")
+      ) {
+        continue;
+      }
+      const runs = this.resultsForBatch(batch.id);
+      const finishedAt = Math.max(0, ...invocations.map((item) => item.finishedAt ?? 0));
+      settled.push({
+        batchId: batch.id,
+        createdAt: batch.createdAt,
+        result: { batchId: batch.id, runs, allRuns: runs, durationMs: Math.max(0, finishedAt - batch.createdAt) },
+      });
+    }
+    return settled.sort((left, right) => left.createdAt - right.createdAt)
+      .map(({ batchId, result }) => ({ batchId, result }));
+  }
+
+  /**
    * Session-scoped sequential root batch id (`batch-1`, `batch-2`, ...).
    * The counter resumes past ids restored from persisted state, and the
    * uniqueness loop guards the rare case of a fresh runtime adopting state
@@ -308,7 +338,7 @@ export class SubagentRuntime {
   }
 
   async runRootBatch(requests: SubagentRequest[], signal?: AbortSignal, onProgress?: (result: BatchResult) => void): Promise<BatchResult> {
-    return this.startRootBatch(requests, signal, onProgress).completion;
+    return this.startRootBatch(requests, signal, onProgress, false).completion;
   }
 
   async runNestedBatch(

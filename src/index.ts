@@ -27,6 +27,7 @@ import { createAgentModelOverrideStore, projectAgentsModelOverridesPath } from "
 import {
   BACKGROUND_SUBAGENT_RESULT_TYPE,
   deliverBackgroundBatchResult,
+  deliveredBackgroundBatchIds,
   renderBackgroundBatchMessage,
 } from "./background.ts";
 import {
@@ -70,6 +71,7 @@ import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
 import { createPainterTool } from "./painter.ts";
+import { createDirectorTool } from "./director.ts";
 import { createAccountController, type AccountController } from "./accounts/controller.ts";
 import { registerAccountCommands } from "./accounts/commands.ts";
 import { registerVoiceInput } from "./voice-input.ts";
@@ -192,6 +194,32 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   let backgroundRuns: BackgroundRunRegistry | undefined;
   /** Per-session setters that collapse/restore the composer agents panel. */
   const panelMinimizeSetters = new Map<string, (minimized: boolean) => void>();
+  /** Serializes lost-follow-up reconciliation passes per session. */
+  const reconcileLocks = new Map<string, Promise<void>>();
+
+  /**
+   * Re-deliver one settled background batch whose follow-up never reached the
+   * transcript. The host queues background results while the parent turn is
+   * streaming and silently discards them when the turn is interrupted before
+   * the queue drains; the persisted result card is the delivery ledger, so a
+   * settled batch without one is re-sent here. One batch per pass — each
+   * delivered result settles its own turn and triggers the next pass.
+   */
+  const redeliverLostBatchResult = (sessionId: string, entries: readonly SessionEntry[]): void => {
+    const owner = runtime;
+    if (!owner || sessionRuntimes.get(sessionId) !== owner) return;
+    const sender = sessionSenders.get(sessionId);
+    if (!sender) return;
+    const delivered = deliveredBackgroundBatchIds(entries);
+    const pending = owner.settledDetachedBatches().filter((batch) => !delivered.has(batch.batchId));
+    const target = pending[0];
+    if (!target) return;
+    void deliverBackgroundBatchResult(
+      { batchId: target.batchId, completion: Promise.resolve(target.result) },
+      sender,
+      () => sessionRuntimes.get(sessionId) === owner,
+    );
+  };
 
   /** Collapse or restore the composer agents panel for this session. */
   const setAgentsPanelMinimized = (ctx: ExtensionContext, minimized: boolean): void => {
@@ -242,6 +270,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerProactiveCompaction(pi);
   registerWebSearch(pi);
   pi.registerTool(createPainterTool({ codexProvider: () => accounts.selectedProviderId("openai-codex") }));
+  pi.registerTool(createDirectorTool());
   // Dictation rides the same voice pipeline: while the ask dialog owns focus,
   // its hotkey triggers a toggle and transcripts land in the focused input.
   pi.registerTool(createAskTool({
@@ -723,6 +752,19 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   pi.on("message_end", () => {
     footer.requestRender(true);
   });
+  // When a turn fully settles, the host's follow-up queue is empty: anything
+  // queued was either consumed (its result card is in the transcript) or
+  // dropped by an interrupt. Settled background batches without a card here
+  // get their result re-delivered, one per settle.
+  pi.on("agent_settled", (_event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const entries = ctx.sessionManager.getEntries();
+    const previous = reconcileLocks.get(sessionId) ?? Promise.resolve();
+    const next = previous.then(() => {
+      redeliverLostBatchResult(sessionId, entries);
+    });
+    reconcileLocks.set(sessionId, next);
+  });
   pi.on("turn_start", () => footer.requestRender());
   pi.on("turn_end", () => footer.requestRender());
   pi.on("tool_execution_start", () => footer.requestRender());
@@ -765,6 +807,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     sessionRuntimes.delete(sessionId);
     sessionSenders.delete(sessionId);
     backgroundRunSenders.delete(sessionId);
+    reconcileLocks.delete(sessionId);
     panelMinimizeSetters.delete(sessionId);
     minimizedPanels.delete(sessionId);
     for (let index = bufferedFollowUps.length - 1; index >= 0; index -= 1) {

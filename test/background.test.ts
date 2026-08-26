@@ -4,6 +4,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   BACKGROUND_SUBAGENT_RESULT_TYPE,
   deliverBackgroundBatchResult,
+  deliveredBackgroundBatchIds,
   renderBackgroundBatchMessage,
   type BackgroundBatchResultDetails,
 } from "../src/background.ts";
@@ -79,6 +80,22 @@ test("background completion resolves its sender at settle time (survives reload)
 
   assert.equal(sent.length, 1);
   assert.equal((sent[0] as { customType?: string }).customType, BACKGROUND_SUBAGENT_RESULT_TYPE);
+});
+
+test("deliveredBackgroundBatchIds reads the delivery ledger from transcript entries", () => {
+  const details = (batchId: string) => ({ batchId, durationMs: 1, runs: [] });
+  const entries: any[] = [
+    { type: "custom_message", customType: BACKGROUND_SUBAGENT_RESULT_TYPE, details: details("batch-1") },
+    // Same custom type but no batch id in details: not a usable ledger entry.
+    { type: "custom_message", customType: BACKGROUND_SUBAGENT_RESULT_TYPE, details: undefined },
+    // Other extension messages and non-message entries are ignored.
+    { type: "custom_message", customType: "pi-subagents", details: details("batch-2") },
+    { type: "custom", customType: BACKGROUND_SUBAGENT_RESULT_TYPE, data: { details: details("batch-3") } },
+    { type: "message", message: { role: "assistant" } },
+  ];
+
+  assert.deepEqual([...deliveredBackgroundBatchIds(entries)], ["batch-1"]);
+  assert.equal(deliveredBackgroundBatchIds([]).size, 0);
 });
 
 test("unexpected background batch failures still report back", async () => {

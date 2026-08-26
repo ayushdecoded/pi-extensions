@@ -63,6 +63,8 @@ export type InvocationRecord = {
 export type BatchRecord = {
   id: string;
   createdAt: number;
+  /** True when launched detached and its result is delivered as a background follow-up message. */
+  detached?: boolean;
 };
 
 export type DelegationCallRecord = {

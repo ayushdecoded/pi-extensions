@@ -4,24 +4,26 @@ import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { askInComposer, type AskAnswer, type AskQuestion, type AskComposerResult } from "./composer.ts";
 
+type HerdrEvents = { emit(channel: string, data: unknown): void };
+
 const TOOL_DESCRIPTION =
-  "Ask the user questions through an interactive picker and wait for answers. Each question lists selectable options plus an always-present write-your-own field; shift+enter attaches a typed note extending the highlighted choice, and voice dictation works in any text field. Use before consequential choices or when clarification beats guessing.";
+  "Ask the user structured questions. Supports up to 15 questions and 6 options each; answers are reviewed before submission.";
 
 const parameters = Type.Object({
   questions: Type.Array(
     Type.Object(
       {
-        question: Type.String({ minLength: 1, description: "Question text shown to the user." }),
+        question: Type.String({ minLength: 1, description: "Question text." }),
         options: Type.Array(Type.String({ minLength: 1, description: "One selectable answer." }), {
           minItems: 2,
-          maxItems: 12,
-          description: "Answer choices, short and distinct.",
+          maxItems: 6,
+          description: "Short answer choices.",
         }),
-        multiple: Type.Optional(Type.Boolean({ description: "True allows several selections (default single-select)." })),
+        multiple: Type.Optional(Type.Boolean({ description: "Allow multiple choices." })),
       },
       { additionalProperties: false },
     ),
-    { minItems: 1, maxItems: 6, description: "Questions presented in one dialog." },
+    { minItems: 1, maxItems: 15, description: "Questions to ask." },
   ),
 }, { additionalProperties: false });
 
@@ -31,14 +33,15 @@ export type AskDetails = {
 };
 
 /** Creates the interactive `ask` tool. */
-export function createAskTool(options: { startDictation?: (ctx: ExtensionContext) => void } = {}) {
+export function createAskTool(options: { startDictation?: (ctx: ExtensionContext) => void; herdrEvents?: HerdrEvents } = {}) {
   return defineTool({
     name: "ask",
     label: "Ask",
     description: TOOL_DESCRIPTION,
-    promptSnippet: "Structured user questions with selectable answers.",
+    promptSnippet: "Ask the user structured questions.",
     promptGuidelines: [
-      "Batch related questions into one ask call.",
+      "Use this tool by default whenever user input is needed.",
+      "Batch related questions into one call.",
       "Ask only what you cannot decide or verify yourself.",
     ],
     parameters,
@@ -46,13 +49,9 @@ export function createAskTool(options: { startDictation?: (ctx: ExtensionContext
     renderCall(args, theme) {
       const questions = (args as { questions?: Array<{ question?: string; options?: string[]; multiple?: boolean }> }).questions ?? [];
       if (questions.length === 0) return new Text(theme.fg("dim", "Ask"), 0, 0);
-      const blocks = questions.map((q, i) => {
-        const opts = (q.options ?? []).map((o) => o.trim()).filter(Boolean);
-        const shown = opts.slice(0, 5).join(theme.fg("borderMuted", " · ")) + (opts.length > 5 ? theme.fg("dim", ` · +${opts.length - 5}`) : "");
-        const mode = q.multiple ? theme.fg("accent", "multi") : theme.fg("dim", "single");
-        return `${theme.fg("muted", `${i + 1}`)}  ${theme.fg("text", q.question ?? "")} ${theme.fg("borderMuted", "·")} ${mode}\n   ${theme.fg("dim", shown)}`;
-      });
-      return new Text(`${theme.fg("accent", "Ask")} ${theme.fg("muted", `${questions.length} ${questions.length === 1 ? "question" : "questions"}`)}\n\n${blocks.join("\n")}`, 0, 0);
+      // One compact line — the interactive panel above the editor already
+      // presents the questions; echoing them here just duplicates it.
+      return new Text(`${theme.fg("accent", "Ask")} ${theme.fg("muted", `${questions.length} ${questions.length === 1 ? "question" : "questions"}`)}`, 0, 0);
     },
     async execute(_toolCallId, params, signal, _onUpdate, ctx): Promise<AgentToolResult<AskDetails>> {
       const questions = normalizeQuestions(params.questions);
@@ -63,11 +62,20 @@ export function createAskTool(options: { startDictation?: (ctx: ExtensionContext
           details: details([]),
         };
       }
-      const result = ctx.mode === "tui" ? await askInComposer(ctx, questions, signal, options.startDictation ? () => options.startDictation!(ctx) : undefined) : await askWithDialogs(ctx, questions);
-      return {
-        content: [{ type: "text", text: formatAnswers(result.answers, questions.length) }],
-        details: details(result.answers),
-      };
+      const herdr = options.herdrEvents;
+      if (herdr) {
+        herdr.emit("herdr:blocked", { active: true, label: "Waiting for you" });
+        if (process.env.HERDR_ENV === "1") process.stdout.write("\x07");
+      }
+      try {
+        const result = ctx.mode === "tui" ? await askInComposer(ctx, questions, signal, options.startDictation ? () => options.startDictation!(ctx) : undefined) : await askWithDialogs(ctx, questions);
+        return {
+          content: [{ type: "text", text: formatAnswers(result.answers, questions.length) }],
+          details: details(result.answers),
+        };
+      } finally {
+        herdr?.emit("herdr:blocked", { active: false });
+      }
     },
     renderResult(result, _options, theme) {
       const { answers } = result.details as AskDetails;
@@ -85,10 +93,11 @@ function normalizeQuestions(raw: Array<{ question: string; options: string[]; mu
   return raw
     .map((q) => ({
       question: q.question.trim(),
-      options: q.options.map((o) => o.trim()).filter((o) => o.length > 0),
+      options: q.options.map((o) => o.trim()).filter((o) => o.length > 0).slice(0, 6),
       multiple: q.multiple === true,
     }))
-    .filter((q) => q.question.length > 0 && q.options.length >= 2);
+    .filter((q) => q.question.length > 0 && q.options.length >= 2)
+    .slice(0, 15);
 }
 
 const CUSTOM_SENTINEL = "✎ Write your own…";
@@ -140,13 +149,16 @@ async function askWithDialogs(ctx: ExtensionContext, questions: AskQuestion[]): 
  * asked them — so each line is `index → selections`, with notes inline.
  */
 export function formatAnswers(answers: AskAnswer[], total: number): string {
-  if (answers.length === 0) return "[ask] no answers · user skipped all questions";
-  const lines = answers.map((answer) => {
+  const byIndex = new Map(answers.map((answer) => [answer.index, answer]));
+  const lines: string[] = [];
+  for (let index = 0; index < total; index += 1) {
+    const answer = byIndex.get(index);
+    if (!answer) { lines.push(`${index + 1} → unanswered`); continue; }
     const parts = answer.selected.map((value) =>
       Object.hasOwn(answer.notes, value) ? `${value} ${JSON.stringify(answer.notes[value])}` : value,
     );
-    return `${answer.index + 1} → ${parts.join(", ")}`;
-  });
-  const header = answers.length < total ? `[ask] answered ${answers.length}/${total} · rest dismissed` : `[ask] answered ${answers.length}/${total}`;
+    lines.push(`${index + 1} → ${parts.join(", ")}`);
+  }
+  const header = answers.length < total ? `[ask] answered ${answers.length}/${total} · unanswered ${total - answers.length}` : `[ask] answered ${answers.length}/${total}`;
   return [header, ...lines].join("\n");
 }

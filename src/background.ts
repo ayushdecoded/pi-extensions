@@ -1,4 +1,4 @@
-import type { ExtensionAPI, MessageRenderer, MessageRenderOptions, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, MessageRenderer, MessageRenderOptions, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import type { BackgroundBatchLaunch, BatchResult } from "./runtime/types.ts";
 import { formatBatchForModel } from "./tool.ts";
@@ -24,6 +24,22 @@ export type BackgroundBatchResultDetails = {
   runs: BackgroundBatchRunSummary[];
   error?: string;
 };
+
+/**
+ * Batch ids whose result card already exists in the transcript. The persisted
+ * custom message is the delivery ledger: it is written exactly when the host
+ * consumes the follow-up, so a settled batch without a card here was queued
+ * and lost (e.g. the turn was interrupted before the queue drained).
+ */
+export function deliveredBackgroundBatchIds(entries: readonly SessionEntry[]): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    if (entry.type !== "custom_message" || entry.customType !== BACKGROUND_SUBAGENT_RESULT_TYPE) continue;
+    const batchId = (entry.details as BackgroundBatchResultDetails | undefined)?.batchId;
+    if (batchId) ids.add(batchId);
+  }
+  return ids;
+}
 
 /**
  * Deliver one hidden follow-up after a detached root batch settles. The active

@@ -162,6 +162,19 @@ Provider arguments accept `codex`, `openai-codex`, `opencode`, `go`, or `opencod
 
 Codex quota windows are polled through the authenticated native Codex provider after turns, periodically, and near known reset times. OpenCode Go quota state comes only from provider response headers/errors. The UI says `exhausted` when reset timing is unknown and adds `resets …` only when the provider supplied a usable reset instant.
 
+## Video generation (Director)
+
+The `director` tool creates videos with the active xAI login (SuperGrok/X Premium). Sign in once with `/login xai`; the tool reuses Pi's existing `xai` OAuth/API credential — no separate key is stored. It calls xAI's experimental Imagine video endpoints directly (`https://api.x.ai/v1/videos/generations`, `/videos/edits`) and never invokes a Grok chat turn. Director submits with an idempotency key, polls `GET /videos/{request_id}` until done, and downloads the result as an MP4 to `~/.pi/generated_videos/YYYY-MM-DD/`. Pi cannot inline-render video; the tool result reports the local path and source URL.
+
+Supported modes (exactly one kind of media per call):
+
+- **Text-to-video** — prompt only (`grok-imagine-video`).
+- **Image-to-video** — one `source_image` (local path or HTTPS URL), animating it (`grok-imagine-video-1.5`).
+- **Reference-to-video** — up to 7 `reference_images` guiding subjects and style.
+- **Edit** — a `source_video` (MP4/WebM) plus a prompt-guided change (`/videos/edits`).
+
+Generated clips support 1–15 seconds (at most 10 with reference images), aspect ratios `1:1 16:9 9:16 4:3 3:4 3:2 2:3`, and `480p`/`720p`. Edits inherit the source video's duration and geometry. Processing is asynchronous and can take minutes.
+
 ## Voice input
 
 `Ctrl+Shift+R` (or `/voice`) toggles voice input: the first press starts recording the microphone via `pw-record`, the second stops and transcribes the clip into the prompt editor. While recording, a widget above the editor shows a pulsing REC dot, an elapsed timer, and a waveform that responds to the actual microphone level (sampled from the growing WAV file). On the second press the widget switches to a transcribing spinner; when the transcript arrives it is pasted into the input box with a preview notification and the widget disappears. The footer status text is not used — the widget is the indicator.

@@ -768,6 +768,54 @@ test("rebindForReload re-points extension-bound hooks for the adopting instance"
   assert.equal(runtime.options.rootSessionId, "validation-root", "session identity survives the handoff");
 });
 
+test("settledDetachedBatches reports only settled detached batches, oldest first", () => {
+  const runtime = validationRuntime([]);
+
+  // Inline (background:false) batch: never eligible for follow-up redelivery.
+  applyEvent(runtime.state, { type: "batch.started", batch: { id: "inline", createdAt: 5 } });
+  applyEvent(runtime.state, {
+    type: "invocation.queued",
+    invocation: invocation({ id: "i-inline", batchId: "inline", agent: "atlas-1", role: "Atlas", status: "queued" }),
+  });
+  applyEvent(runtime.state, { type: "invocation.finished", id: "i-inline", status: "complete", finishedAt: 50, usage: { ...ZERO_USAGE } });
+
+  // Detached but still running: excluded until every run settles.
+  applyEvent(runtime.state, { type: "batch.started", batch: { id: "batch-live", createdAt: 10, detached: true } });
+  applyEvent(runtime.state, {
+    type: "invocation.queued",
+    invocation: invocation({ id: "i-live", batchId: "batch-live", agent: "atlas-2", role: "Atlas", status: "queued" }),
+  });
+
+  // Detached and settled, queued later than the third batch: ordering check.
+  applyEvent(runtime.state, { type: "batch.started", batch: { id: "batch-second", createdAt: 30, detached: true } });
+  applyEvent(runtime.state, {
+    type: "invocation.queued",
+    invocation: invocation({ id: "i-second", batchId: "batch-second", agent: "atlas-3", role: "Atlas", status: "queued" }),
+  });
+  applyEvent(runtime.state, { type: "invocation.finished", id: "i-second", status: "failed", finishedAt: 130, error: "boom", usage: { ...ZERO_USAGE } });
+
+  assert.deepEqual(runtime.settledDetachedBatches().map((batch) => batch.batchId), ["batch-second"], "live and inline batches are excluded");
+
+  applyEvent(runtime.state, { type: "batch.started", batch: { id: "batch-first", createdAt: 20, detached: true } });
+  applyEvent(runtime.state, {
+    type: "invocation.queued",
+    invocation: invocation({ id: "i-first", batchId: "batch-first", agent: "atlas-4", role: "Atlas", status: "queued" }),
+  });
+  applyEvent(runtime.state, { type: "invocation.finished", id: "i-first", status: "complete", finishedAt: 120, usage: { ...ZERO_USAGE } });
+
+  const settled = runtime.settledDetachedBatches();
+  assert.deepEqual(settled.map((batch) => batch.batchId), ["batch-first", "batch-second"], "oldest first, live and inline excluded");
+  const first = settled[0]!;
+  assert.equal(first.result.batchId, "batch-first");
+  assert.equal(first.result.runs.length, 1);
+  assert.equal(first.result.runs[0]!.agent, "atlas-4");
+  assert.equal(first.result.runs[0]!.status, "complete");
+  assert.equal(first.result.durationMs, 100);
+  const second = settled[1]!;
+  assert.equal(second.result.runs[0]!.status, "failed");
+  assert.equal(second.result.runs[0]!.error, "boom");
+});
+
 function validationRuntime(events: unknown[]): SubagentRuntime {
   return new SubagentRuntime({
     rootSessionId: "validation-root",
