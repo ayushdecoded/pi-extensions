@@ -8,7 +8,7 @@ import type { Component, TUI } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 import { codexAuth, codexAuthHeaders } from "./codex-auth.ts";
 import { pasteDictated } from "./dictation-target.ts";
-import { playerctlMediaPause, type MediaPause } from "./media-pause.ts";
+import { mprisMediaPause, type MediaPause } from "./media-pause.ts";
 
 const TRANSCRIBE_URL = "https://chatgpt.com/backend-api/transcribe";
 const RECORD_DIR = join(tmpdir(), "pi-voice");
@@ -175,7 +175,7 @@ export type VoiceInputDependencies = {
   fetch?: typeof fetch;
   recorder?: Recorder;
   recordDir?: string;
-  /** Pauses MPRIS media while recording; defaults to playerctl. */
+  /** Pauses MPRIS media while recording; defaults to busctl (systemd). */
   mediaPause?: MediaPause;
   /** Selected Codex account provider; authentication still resolves through Pi. */
   codexProvider?: () => string;
@@ -187,7 +187,7 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
   const fetchImpl = dependencies.fetch ?? fetch;
   const recorder = dependencies.recorder ?? pwRecordRecorder();
   const recordDir = dependencies.recordDir ?? RECORD_DIR;
-  const mediaPause = dependencies.mediaPause ?? playerctlMediaPause();
+  const mediaPause = dependencies.mediaPause ?? mprisMediaPause();
   let active: { handle: RecorderHandle; filePath: string; pausedPlayers: string[] } | null = null;
 
   /** Toggle: start recording, or stop and transcribe into the prompt editor. */

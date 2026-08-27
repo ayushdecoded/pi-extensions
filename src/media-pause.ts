@@ -5,8 +5,10 @@ import { execFile } from "node:child_process";
  * behavior of Omarchy's native dictation (Voxtype `pause_media`): pause
  * anything that speaks MPRIS the moment recording starts, resume on release.
  *
- * Backed by the `playerctl` CLI. Every failure degrades to a no-op so media
- * handling can never break recording or transcription.
+ * Talks MPRIS over the session bus via `busctl` (part of systemd, so present
+ * on every modern Linux desktop — no extra packages). Each player is handled
+ * independently, so one stuck player can't block the rest; every failure
+ * degrades to a no-op so media handling can never break recording.
  */
 export interface MediaPause {
   /** Snapshot currently-playing MPRIS players, pause them, and return their names. */
@@ -15,31 +17,44 @@ export interface MediaPause {
   resume(players: string[]): Promise<void>;
 }
 
-/** Default MediaPause backed by the playerctl CLI (installed on Omarchy). */
-export function playerctlMediaPause(timeoutMs = 2000): MediaPause {
+const MPRIS_PREFIX = "org.mpris.MediaPlayer2.";
+const PLAYER_PATH = "/org/mpris/MediaPlayer2";
+const PLAYER_IFACE = "org.mpris.MediaPlayer2.Player";
+
+/** Default MediaPause backed by busctl on the session bus. */
+export function mprisMediaPause(timeoutMs = 2000): MediaPause {
   const run = (args: string[]): Promise<string> =>
     new Promise((resolve) => {
-      execFile("playerctl", args, { encoding: "utf8", timeout: timeoutMs }, (error, stdout) => {
-        resolve(error ? "" : stdout);
-      });
+      execFile(
+        "busctl",
+        ["--user", "--no-pager", `--timeout=${Math.ceil(timeoutMs / 1000)}`, ...args],
+        { encoding: "utf8", timeout: timeoutMs },
+        // A failing call (missing bus, player vanished mid-query) just yields
+        // empty output; callers treat that as "nothing to do".
+        (_error, stdout) => resolve(stdout),
+      );
     });
 
   return {
     async pause(): Promise<string[]> {
-      const status = await run(["--all-players", "--no-messages", "--format", "{{playerName}}\t{{status}}", "status"]);
-      const playing = status
+      const listing = await run(["list", "--no-legend"]);
+      const players = listing
         .split("\n")
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => line.split("\t"))
-        .filter((parts) => parts.length === 2 && parts[1] === "Playing")
-        .map((parts) => parts[0]);
-      if (playing.length > 0) await run(["--all-players", "--no-messages", "pause"]);
+        .map((line) => line.trim().split(/\s+/)[0] ?? "")
+        .filter((name) => name.startsWith(MPRIS_PREFIX));
+      // Check statuses in parallel; keep only players actually playing.
+      const playing = (await Promise.all(
+        players.map(async (name) => {
+          const status = await run(["get-property", name, PLAYER_PATH, PLAYER_IFACE, "PlaybackStatus"]);
+          // busctl prints string properties as `s "Playing"`.
+          return status.includes("Playing") ? name : null;
+        }),
+      )).filter((name): name is string => name !== null);
+      await Promise.all(playing.map((name) => run(["call", name, PLAYER_PATH, PLAYER_IFACE, "Pause"])));
       return playing;
     },
     async resume(players: string[]): Promise<void> {
-      if (players.length === 0) return;
-      await run([`--player=${players.join(",")}`, "--no-messages", "play"]);
+      await Promise.all(players.map((name) => run(["call", name, PLAYER_PATH, PLAYER_IFACE, "Play"])));
     },
   };
 }
