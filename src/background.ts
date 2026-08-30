@@ -42,9 +42,10 @@ export function deliveredBackgroundBatchIds(entries: readonly SessionEntry[]): S
 }
 
 /**
- * Deliver one hidden follow-up after a detached root batch settles. The active
- * runtime guard prevents an old branch or replaced session from receiving a
- * stale completion.
+ * Deliver one hidden steering message after a detached root batch settles. The
+ * active runtime guard prevents an old branch or replaced session from receiving
+ * a stale completion. Steering makes the result available before the model's
+ * next decision instead of waiting until the current agent loop finishes.
  */
 export async function deliverBackgroundBatchResult(
   launch: BackgroundBatchLaunch,
@@ -82,7 +83,7 @@ export async function deliverBackgroundBatchResult(
         display: true,
         details,
       },
-      { triggerTurn: true, deliverAs: "followUp" },
+      { triggerTurn: true, deliverAs: "steer" },
     );
   } catch {
     // Session replacement can race the active-runtime check and invalidate Pi's

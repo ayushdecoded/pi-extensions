@@ -10,7 +10,7 @@ import {
 } from "../src/background.ts";
 import { ZERO_USAGE, type BatchResult } from "../src/runtime/types.ts";
 
-test("background batches report once after aggregate completion with follow-up delivery", async () => {
+test("background batches steer aggregate completion into the next model decision", async () => {
   let resolve!: (result: BatchResult) => void;
   const completion = new Promise<BatchResult>((done) => { resolve = done; });
   const sent: Array<{ message: any; options: any }> = [];
@@ -48,7 +48,7 @@ test("background batches report once after aggregate completion with follow-up d
       { role: "Vigil", agent: "vigil-1", status: "failed", error: "timed out" },
     ],
   });
-  assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "steer" });
 });
 
 test("background completion is suppressed after its owning runtime is replaced", async () => {
@@ -108,7 +108,7 @@ test("unexpected background batch failures still report back", async () => {
   assert.equal(sent.length, 1);
   assert.match(sent[0]!.message.content, /broken · failed[\s\S]*runtime unavailable/);
   assert.deepEqual(sent[0]!.message.details, { batchId: "broken", durationMs: 0, runs: [], error: "runtime unavailable" });
-  assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "steer" });
 });
 
 test("a session-replacement send race does not reject detached completion", async () => {
