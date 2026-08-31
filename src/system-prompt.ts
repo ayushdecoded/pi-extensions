@@ -5,6 +5,7 @@ import {
   type BuildSystemPromptOptions,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
+import { filterVisibleSkills } from "./skills-policy.ts";
 
 const BUNDLED_SYSTEM_PROMPT_FILE = fileURLToPath(new URL("../resources/SYSTEM.md", import.meta.url));
 const BUNDLED_SYSTEM_PROMPT = readFileSync(BUNDLED_SYSTEM_PROMPT_FILE, "utf8").trim();
@@ -48,7 +49,8 @@ export function assemblePackSystemPrompt(mainPrompt: string, options: BuildSyste
   }
 
   const hasRead = !options.selectedTools || options.selectedTools.includes("read");
-  if (hasRead && options.skills?.length) prompt += formatSkillsForPrompt(options.skills);
+  const visibleSkills = options.skills ? filterVisibleSkills(options.skills, options.cwd) : [];
+  if (hasRead && visibleSkills.length) prompt += formatSkillsForPrompt(visibleSkills);
 
   prompt += `\nCurrent working directory: ${options.cwd.replace(/\\/g, "/")}`;
   return prompt;

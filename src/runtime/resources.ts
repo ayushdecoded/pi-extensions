@@ -9,6 +9,7 @@ import {
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentRole } from "../config/agents.ts";
 import { createVisionHookExtension } from "./vision-hook.ts";
+import { filterVisibleSkills } from "../skills-policy.ts";
 
 export async function createRoleResourceLoader(
   cwd: string,
@@ -41,7 +42,7 @@ export async function createRoleResourceLoader(
       ),
     ],
     skillsOverride: (base) => ({
-      skills: base.skills.filter((skill) => allowedSkills.has(skill.name)),
+      skills: filterVisibleSkills(base.skills, cwd).filter((skill) => allowedSkills.has(skill.name)),
       diagnostics: base.diagnostics,
     }),
     systemPromptOverride: () => undefined,

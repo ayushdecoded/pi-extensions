@@ -12,6 +12,7 @@ import {
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { agentModelLabel, type AgentRole, type AgentsConfig } from "../config/agents.ts";
 import { roleRgb, roleText } from "./roles.ts";
+import { filterVisibleSkillsPrompt } from "../skills-policy.ts";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -80,7 +81,7 @@ export function installHeader(
     concurrency: config.defaults.concurrency,
     // Pi has already resolved skills from every supported source before session_start.
     // Read its effective prompt rather than duplicating its discovery rules here.
-    skills: discoverAvailableSkills(ctx.getSystemPrompt()),
+    skills: discoverAvailableSkills(filterVisibleSkillsPrompt(ctx.getSystemPrompt(), ctx.cwd)),
     prompts: discoverResourceNames(commands, "prompt"),
     extensions: discoverExtensionNames(commands),
     themes: ctx.ui.getAllThemes().map((theme) => theme.name).sort(),
