@@ -46,8 +46,8 @@ test("before_agent_start returns one cached replacement and honors explicit SYST
 
   assert.equal(first?.systemPrompt, second?.systemPrompt);
   assert.equal(first?.systemPrompt?.match(/collaborative software engineering agent/g)?.length, 1);
-  assert.match(first?.systemPrompt ?? "", /Treat existing code as evidence, not an immutable specification/);
-  assert.match(first?.systemPrompt ?? "", /confirm it explicitly with the user/);
+  assert.match(first?.systemPrompt ?? "", /Treat existing code as an evolving structure rather than the source of truth/);
+  assert.match(first?.systemPrompt ?? "", /Don’t assume backwards compatibility is required; confirm it explicitly/);
   assert.equal(
     handler!({ ...event, systemPromptOptions: { ...options, customPrompt: "project override" } }),
     undefined,
