@@ -125,7 +125,7 @@ test("rejects subagent in tools and directs configs to delegates", async () => {
   );
 });
 
-test("uses global config only when the project config is absent", async () => {
+test("overlays project config on top of global config", async () => {
   const cwd = await fixture();
   const homeDir = await mkdtemp(path.join(os.tmpdir(), "pi-extensions-home-"));
   const globalFile = path.join(homeDir, ".config", "pi", "agents.yaml");
@@ -136,9 +136,12 @@ test("uses global config only when the project config is absent", async () => {
   assert.equal(agentsConfigPath({ cwd, homeDir }), globalFile);
   assert.equal(loadAgentsConfig({ cwd, homeDir }).path, globalFile);
 
-  await writeFile(projectAgentsPath(cwd), "version: 1\n");
+  await writeFile(projectAgentsPath(cwd), yaml.replace("openai-codex/gpt-5.6-luna", "openai-codex/project-model"));
   assert.equal(agentsConfigPath({ cwd, homeDir }), projectAgentsPath(cwd));
-  assert.equal(validateAgentsFile({ cwd, homeDir }).ok, false);
+  const merged = loadAgentsConfig({ cwd, homeDir });
+  assert.equal(merged.path, projectAgentsPath(cwd));
+  assert.equal(merged.roles.find((role) => role.name === "Worker")?.model, "openai-codex/project-model");
+  assert.equal(validateAgentsFile({ cwd, homeDir }).ok, true);
 });
 
 test("uses bundled package defaults only when project and global configs are absent", async () => {

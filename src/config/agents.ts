@@ -115,7 +115,7 @@ const PRESET_KEYS = ["model", "thinking", "prompt", "image", "imagePrompt"];
 
 const BUNDLED_AGENTS_PATH = fileURLToPath(new URL("../../resources/agents.yaml", import.meta.url));
 
-/** The project file wins completely, then global config, then the package defaults. */
+/** The project config overlays the global config, which overlays the bundled defaults. */
 export function projectAgentsPath(cwd: string = process.cwd()): string {
   return path.join(cwd, ".pi", AGENTS_CONFIG_FILE_NAME);
 }
@@ -138,10 +138,17 @@ export function agentsConfigPath(options: LoadAgentsConfigOptions = {}): string 
   return packageAgentsPath(options.packagePath);
 }
 
-/** Load one complete config, without merging project, global, or package sources. */
+/** Load the selected config, overlaying global settings when a project config is present. */
 export function loadAgentsConfig(options: LoadAgentsConfigOptions = {}): AgentsConfig {
   const file = agentsConfigPath(options);
+  const project = projectAgentsPath(options.cwd);
+  const global = globalAgentsPath(options.homeDir);
+  const sources = file === project && fs.existsSync(global) ? [global, project] : [file];
+  const configs = sources.map((sourcePath) => parseAgentsFile(sourcePath));
+  return configs.length === 1 ? configs[0]! : overlayAgentsConfig(configs[0]!, configs[1]!);
+}
 
+function parseAgentsFile(file: string): AgentsConfig {
   let source: string;
   try {
     source = fs.readFileSync(file, "utf8");
@@ -157,6 +164,34 @@ export function loadAgentsConfig(options: LoadAgentsConfigOptions = {}): AgentsC
   }
 
   return parseAgentsConfig(value, file);
+}
+
+/** Overlay named project entries on top of the global config while retaining global fallbacks. */
+function overlayAgentsConfig(base: AgentsConfig, project: AgentsConfig): AgentsConfig {
+  const roles = [...base.roles];
+  for (const role of project.roles) {
+    const index = roles.findIndex((candidate) => candidate.name.toLowerCase() === role.name.toLowerCase());
+    if (index === -1) roles.push(role);
+    else roles[index] = role;
+  }
+
+  const presets = [...base.presets];
+  for (const preset of project.presets) {
+    const index = presets.findIndex((candidate) => candidate.name.toLowerCase() === preset.name.toLowerCase());
+    if (index === -1) presets.push(preset);
+    else presets[index] = preset;
+  }
+
+  return {
+    ...project,
+    path: project.path,
+    defaults: { ...base.defaults, ...project.defaults },
+    roles,
+    presets,
+    ...(project.defaultPreset === undefined && base.defaultPreset !== undefined
+      ? { defaultPreset: base.defaultPreset }
+      : {}),
+  };
 }
 
 /** Parse and strictly validate the locked v1 schema. */
