@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { CapacityScheduler } from "../src/runtime/scheduler.ts";
 import { advanceStateRevision, applyEvent, emptyRuntimeState, usageDelta } from "../src/runtime/state.ts";
-import { ZERO_USAGE, type InvocationRecord } from "../src/runtime/types.ts";
+import { ZERO_USAGE, type BatchResult, type InvocationRecord } from "../src/runtime/types.ts";
 import type { AgentsConfig } from "../src/config/agents.ts";
 import type { RoleOverride } from "../src/config/model-overrides.ts";
 import {
@@ -312,7 +312,7 @@ test("a caller signal still cancels synchronous root batches through the batch c
   const controller = new AbortController();
   const pending = runtime.runRootBatch([{ role: "Atlas", task: "Sync" }], controller.signal);
   controller.abort(new Error("parent turn stopped"));
-  const result = await pending;
+  const result = (await pending) as BatchResult;
   assert.equal(result.runs[0]!.status, "failed");
 });
 
@@ -385,10 +385,10 @@ test("nested delegation allows only configured roles and owned follow-ups", () =
   const atlasOnly = new Set(["atlas"]);
 
   assert.doesNotThrow(() => enforce([{ role: "Atlas", task: "fresh" }], "architect-1", atlasOnly));
-  assert.doesNotThrow(() => enforce([{ agent: "atlas-owned", task: "continue" }], "architect-1", atlasOnly));
+  assert.doesNotThrow(() => enforce([{ agent: "atlas-owned", messages: [{ message: "continue" }] }], "architect-1", atlasOnly));
   assert.throws(() => enforce([{ role: "Worker", task: "fresh" }], "architect-1", atlasOnly), /cannot delegate to role Worker/);
-  assert.throws(() => enforce([{ agent: "worker-owned", task: "continue" }], "architect-1", atlasOnly), /cannot follow up with role Worker/);
-  assert.throws(() => enforce([{ agent: "atlas-foreign", task: "continue" }], "architect-1", atlasOnly), /only follow up with agents it spawned/);
+  assert.throws(() => enforce([{ agent: "worker-owned", messages: [{ message: "continue" }] }], "architect-1", atlasOnly), /cannot follow up with role Worker/);
+  assert.throws(() => enforce([{ agent: "atlas-foreign", messages: [{ message: "continue" }] }], "architect-1", atlasOnly), /only follow up with agents it spawned/);
 });
 
 test("projection keeps nested agents attached and active batches above settled batches", () => {
@@ -493,22 +493,6 @@ test("state revisions cache projections and direct usage updates invalidate aggr
 
   const revisionless = { agents: state.agents, invocations: state.invocations, batches: state.batches, delegationCalls: state.delegationCalls };
   assert.notStrictEqual(projectBatches(revisionless), projectBatches(revisionless), "revision remains optional for stubs");
-});
-
-test("transcript revisions notify their dedicated subscribers without repainting general runtime listeners", () => {
-  const runtime = validationRuntime([]);
-  let generalUpdates = 0;
-  const transcriptUpdates: Array<[string, number]> = [];
-  const unsubscribeGeneral = runtime.subscribe(() => { generalUpdates += 1; });
-  const unsubscribeTranscript = runtime.subscribeTranscript((handle, revision) => transcriptUpdates.push([handle, revision]));
-
-  (runtime as any).notifyTranscript("atlas-1");
-  (runtime as any).notifyTranscript("atlas-1");
-  assert.equal(generalUpdates, 0);
-  assert.deepEqual(transcriptUpdates, [["atlas-1", 1], ["atlas-1", 2]]);
-  assert.equal(runtime.transcriptRevision("atlas-1"), 2);
-  unsubscribeGeneral();
-  unsubscribeTranscript();
 });
 
 test("parallel tool activity survives out-of-order completion and shows a count", () => {

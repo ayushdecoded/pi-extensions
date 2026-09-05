@@ -10,7 +10,7 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import { agentModelLabel, type AgentRole, type AgentsConfig } from "../config/agents.ts";
+import type { AgentRole, AgentsConfig } from "../config/agents.ts";
 import { roleRgb, roleText } from "./roles.ts";
 import { filterVisibleSkillsPrompt } from "../skills-policy.ts";
 
@@ -115,7 +115,7 @@ function agentsForRoles(roles: readonly AgentRole[]): HeaderInfo["agents"] {
     .sort((left, right) => roleOrder(left.name) - roleOrder(right.name))
     .map((role) => ({
       name: role.name,
-      model: agentModelLabel(role.model, role.backend),
+      model: role.model,
       thinking: role.thinking,
     }));
 }

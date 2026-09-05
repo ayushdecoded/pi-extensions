@@ -1,7 +1,7 @@
 import type { InlineExtension, ModelRegistry } from "@earendil-works/pi-coding-agent";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { AgentBackend, AgentRole, AgentsConfig } from "../config/agents.ts";
-import type { SessionRoleOverride } from "../config/model-overrides.ts";
+import type { AgentRole, AgentsConfig } from "../config/agents.ts";
+import type { RoleOverride } from "../config/model-overrides.ts";
 import type { SubagentHeadingGenerator } from "../subagent-headings.ts";
 
 export type Usage = {
@@ -29,8 +29,6 @@ export type AgentRecord = {
   role: string;
   sessionFile: string;
   createdAt: number;
-  backend?: AgentBackend;
-  backendSessionId?: string;
 };
 
 export type InvocationRecord = {
@@ -43,8 +41,6 @@ export type InvocationRecord = {
   heading?: string;
   agent: string;
   role: string;
-  /** Backend selected for this invocation; absent on older persisted entries. */
-  backend?: AgentBackend;
   task: string;
   followup: boolean;
   ordinal: number;
@@ -91,13 +87,35 @@ export type FreshRequest = {
   timeoutMinutes?: number;
 };
 
+export type FollowupDelivery = "queue" | "steer";
+
+export type FollowupMessage = {
+  message: string;
+  delivery?: FollowupDelivery;
+};
+
 export type FollowupRequest = {
   agent: string;
-  task: string;
+  messages: FollowupMessage[];
   timeoutMinutes?: number;
 };
 
 export type SubagentRequest = FreshRequest | FollowupRequest;
+
+export type FollowupReceipt = {
+  id: string;
+  agent: string;
+  delivery: FollowupDelivery;
+  status: "accepted" | "rejected";
+  state: "queued" | "steering" | "consumed" | "rejected";
+  message?: string;
+};
+
+export type FollowupBatchResult = {
+  followups: FollowupReceipt[];
+  /** Internal completion handle used only by queue-only background:false calls. */
+  completion?: Promise<BatchResult>;
+};
 
 export type InvocationResult = {
   invocationId: string;
@@ -124,18 +142,86 @@ export type BackgroundBatchLaunch = {
   completion: Promise<BatchResult>;
 };
 
-/** Manage an existing background batch through the tool's `background` parameter. */
-export type BackgroundBatchManage = {
-  action: "cancel";
+/** Released to the synchronous caller when its foreground root batch is promoted to the background. */
+export type PromotedBatchReceipt = {
+  promoted: true;
   batchId: string;
+  /** Agents still running detached in the promoted batch. */
+  agentCount: number;
 };
 
-export type BackgroundBatchReceipt =
-  | { background: true; batchId: string; status: "started"; agentCount: number }
-  | { background: true; batchId: string; status: "cancelled"; scope: "batch" | "agent" }
-  | { background: true; batchId: string; status: "not-found" };
+export function isPromotedReceipt(result: BatchResult | PromotedBatchReceipt): result is PromotedBatchReceipt {
+  return (result as PromotedBatchReceipt).promoted === true;
+}
 
-export type SubagentToolResult = BatchResult | BackgroundBatchReceipt;
+/** Outcome of a promotion request against a foreground root batch. */
+export type RootBatchPromotion =
+  | { status: "promoted"; batchId: string; launch: BackgroundBatchLaunch }
+  /** The batch settled before promotion; its full result already went to the synchronous caller. */
+  | { status: "settled"; batchId: string }
+  /** No promotable foreground root batch has this id (unknown, detached, or an already-promoted-and-settled batch). */
+  | { status: "not-found"; batchId: string };
+
+/** Manage an existing background batch through the tool's `background` parameter. */
+export type ControlTarget =
+  | { agent: string }
+  | { batch: string }
+  | { all: true };
+
+export type ControlAction = "inspect" | "cancel";
+
+export type ControlRequest = {
+  action: ControlAction;
+  target: ControlTarget;
+};
+
+export type InspectionPendingItem = {
+  id: string;
+  preview: string;
+};
+
+export type AgentInspection = {
+  agent: string;
+  role: string;
+  status: InvocationStatus | "idle";
+  taskPreview?: string;
+  elapsedMs?: number;
+  activity?: { tool?: string; detail?: string };
+  progress?: string;
+  pendingSteering: InspectionPendingItem[];
+  pendingQueue: InspectionPendingItem[];
+};
+
+export type BatchInspection = {
+  batch: string;
+  liveAgents: number;
+  totalAgents: number;
+  elapsedMs?: number;
+  status: "running" | "settled" | "unknown";
+};
+
+export type InspectionResult = {
+  action: "inspect";
+  target: ControlTarget;
+  agents: AgentInspection[];
+  batches: BatchInspection[];
+  truncated: boolean;
+};
+
+export type CancellationResult = {
+  action: "cancel";
+  target: ControlTarget;
+  status: "cancelled" | "not-found";
+  scope: "agent" | "batch" | "all";
+  stopped?: number;
+};
+
+export type ControlResult = InspectionResult | CancellationResult;
+
+export type BackgroundBatchReceipt =
+  | { background: true; batchId: string; status: "started"; agentCount: number; followups?: FollowupReceipt[] };
+
+export type SubagentToolResult = BatchResult | PromotedBatchReceipt | FollowupBatchResult | ControlResult | BackgroundBatchReceipt | (BatchResult & FollowupBatchResult);
 
 export type InvocationContext = {
   batchId: string;
@@ -159,16 +245,16 @@ export type RuntimeOptions = {
   routeAccountModel?: <TApi extends Api>(model: Model<TApi>) => Model<TApi>;
   /** Name of the active preset; roles resolve through it. Defaults to default_preset. */
   activeMode?: string;
-  /** UI override for one role in a preset; backend is session-only. */
-  roleOverride?: (preset: string | undefined, role: string) => SessionRoleOverride | undefined;
-  /** Override the Devin executable for isolated verification. */
-  devinCommand?: string;
+  /** UI override for one role in a preset; applies model and thinking to freshly resolved roles. */
+  roleOverride?: (preset: string | undefined, role: string) => RoleOverride | undefined;
+  /** Root callback for detached queue results; nested runtimes intentionally omit delivery. */
+  deliverQueuedBatch?: (launch: BackgroundBatchLaunch) => void;
 };
 
 export type SubagentEvent =
   | { type: "agent.created"; agent: AgentRecord }
-  | { type: "agent.backend-session"; handle: string; sessionId: string }
   | { type: "batch.started"; batch: BatchRecord }
+  | { type: "batch.promoted"; batchId: string; promotedAt: number }
   | { type: "delegation.started"; call: DelegationCallRecord }
   | {
       type: "delegation.headings";

@@ -56,8 +56,6 @@ roles:
     prompt: agents/forge.md
     tools: [read, bash, edit, write]
     delegates: []
-    backend: native
-    backendOptions: [native, devin]
     skills: []
     timeoutMinutes: 20
 presets:
@@ -84,7 +82,7 @@ When a text-only role model reads an image file, the `read` result keeps the ima
 
 The active preset starts from `default_preset` (or the last selected one, persisted in `~/.config/pi/agents-mode.json` per config path). Use `/agent-mode` (with argument completion, or a picker when run bare) to choose a preset, or `Ctrl+Shift+S` to cycle through them. Switching takes effect immediately for new subagent calls and re-renders the header (role models + `mode:` label) and footer (`◆ mode`).
 
-Use `/agents configure` to choose a model, thinking level, and (when configured) backend for each role. The overlay opens on the roles list (header shows the active mode and scope), then per role: settings → Model (provider → model, with `Tab` toggling Pi's session-scoped models and all available models, and typing to filter), Thinking (all seven levels), or Backend. The default scope is `session`; press `Ctrl+S` inside the panel to cycle `session → project → global`. Model and thinking overrides persist in the selected scope; backend choices are deliberately session-only and are hidden in project/global scopes. Native Pi remains the default. Set Forge's `backendOptions` to `[native, devin]` to expose Devin's ACP backend; it requires the `devin` CLI and uses one persistent Devin session per Forge handle. There is no automatic fallback. Session overrides are lost on restart, project overrides persist in `<cwd>/.pi/agents-model-overrides.json`, and global overrides persist in `~/.config/pi/agents-model-overrides.json`; precedence is session over project over global. Each confirmed edit applies immediately to new invocations and leaves running agents unchanged. Named plan-account aliases are deduplicated to their canonical provider, so `/account` continues to select the account used. Reset restores the field declared by the active preset without rewriting `agents.yaml`.
+Use `/agents configure` to choose a model, thinking level, or session-only enabled state for every role in the active preset. Disabled roles remain visible and can be re-enabled; disabling affects only new work, while running agents finish. If every active role is disabled, the `subagent` schema exposes only `inspect`/`cancel` controls—there is no fresh-launch role option. The overlay opens on the roles list (header shows the active mode and scope), then per role: settings → searchable Model (with `Tab` toggling Pi's session-scoped models and all available models, and typing to filter) or Thinking (all seven levels). The default scope is `session`; press `Ctrl+S` inside the panel to cycle `session → project → global`. Model and thinking overrides persist in the selected scope; enabled/disabled state is deliberately session-only and is never saved. Use Save defaults explicitly to write model/thinking values for every role at the selected scope. Session overrides are cleared only after a successful in-panel reload, which rereads the saved preset, `agents.yaml`, and model overrides; invalid candidate config leaves the current working state untouched. Project overrides persist in `<cwd>/.pi/agents-model-overrides.json`, and global overrides persist in `~/.config/pi/agents-model-overrides.json`; precedence is session over project over global. Each confirmed edit applies immediately to new invocations and leaves running agents unchanged. `Ctrl+B` promotes all currently blocking root batches; child work, including Bash, continues and one aggregate completion is delivered. This pack does not mutate global keybindings at startup; free `Ctrl+B` in the host editor first when the host default owns it. Named plan-account aliases are deduplicated to their canonical provider, so `/account` continues to select the account used. Reset restores the field declared by the active preset without rewriting `agents.yaml`.
 
 Prompt paths are relative to the selected `agents.yaml`. Project configuration is rejected when Pi does not trust the project. `subagent` is not listed in `tools`; the runtime adds a filtered tool automatically when `delegates` is non-empty.
 
@@ -102,17 +100,25 @@ subagent({
 });
 ```
 
-Follow-up:
+Follow-ups use the existing handle and an ordered message list. Delivery defaults to FIFO `queue`; `steer` is accepted only while the child is actively running and is delivered at the next safe boundary (after its current tool command):
 
 ```ts
 subagent({
-  agents: [{ agent: "atlas-1", task: "Recheck against the implementation." }],
+  agents: [{
+    agent: "atlas-1",
+    messages: [
+      { message: "Recheck the implementation." },
+      { message: "Stop after reporting evidence.", delivery: "steer" },
+    ],
+  }],
 });
 ```
 
+Each message gets an immediate receipt and session-local id. Queued messages retain the child session context and run FIFO per handle; when already active, their completion remains owned by that child session, while an idle child starts a normal follow-up invocation. `background: false` waits inline for queued results only when the submission contains no fresh agents; steering has no separate invocation or result because it belongs to the active turn and is rejected in that mode. A steer request cannot change `timeoutMinutes`, and steering an idle or missing child is rejected. Grouped submissions validate all fresh and follow-up entries before accepting any of them.
+
 Independent array items execute concurrently. `timeoutMinutes` may be omitted to use the role-specific or global default, set to any positive integer to override that default, or set to `-1` for no timeout. Configured timeout values are defaults, not maximum limits.
 
-Root-session delegations are **background by default**: the call returns a batch receipt immediately and one aggregated follow-up arrives after every agent settles, so the main agent continues other work without polling. Pass `background: false` only when this turn must block on the results before doing anything else:
+Root-session fresh delegations are **background by default**: the call returns a batch receipt immediately and one aggregated follow-up arrives after every agent settles, so the main agent continues other work without polling. Follow-ups normally return immediate per-message receipts; queue-only follow-ups with `background: false` wait for their queued results and return them inline. Steering follow-ups cannot be combined with `background: false`. Pass it only when this turn must block on fresh or queued results before doing anything else:
 
 ```ts
 subagent({
@@ -130,16 +136,20 @@ subagent({
 
 After every requested agent has settled—including failures, timeouts, and cancellations—the extension delivers one aggregated follow-up to the main session and triggers a turn when idle. A compact transcript card marks the result (`⟳ Background subagents · settled`) with one colored line per agent; expand it to read the full outputs the model received. Nested child-agent tools do not expose `background`; their delegations remain synchronous, including when the root batch itself is running in the background.
 
-Root batch ids are session-scoped counters (`batch-1`, `batch-2`, ...), unique within the session and resumed after `/reload` or reopening. The main agent can stop a detached batch with its receipt id — every agent in the batch aborts and the final (cancelled) result is still delivered as a follow-up. It can also stop a single live agent by its handle (e.g. `vigil-1`), leaving the rest of the batch running:
+Root batch ids are session-scoped counters (`batch-1`, `batch-2`, ...), unique within the session and resumed after `/reload` or reopening. Use the unified current-session control shape. Targets are mutually exclusive; action calls cannot contain `agents` or `background`:
 
 ```ts
-subagent({ background: { action: "cancel", batchId: "<batchId from the receipt>" } });
-subagent({ background: { action: "cancel", batchId: "vigil-1" } }); // stops just that agent
+subagent({ action: "inspect", target: { agent: "vigil-1" } });
+subagent({ action: "inspect", target: { batch: "<batchId from the receipt>" } });
+subagent({ action: "cancel", target: { agent: "vigil-1" } }); // leaves the rest of its batch running
+subagent({ action: "cancel", target: { all: true } });
 ```
 
-An unknown or already-settled id (or a handle that is no longer live) returns a `not found` notice instead of an error.
+Inspection is read-only and bounded: it reports only current status, short task previews, elapsed time, selected tool activity, visible progress text, and measurable pending steering/queue IDs with short previews. It never dumps arguments, tool output, transcripts, or private reasoning; it does not interrupt work, steer a child, trigger a turn, or consume completion delivery. Nested children may inspect/cancel only their own spawned children. There is no queued-task target or provider observability action.
 
-Detached batches survive `/reload`: the reload keeps the process alive and re-invokes this extension, so the runtime hands its running child sessions off to the reloaded instance instead of aborting them. The agents keep working, their state stays visible in `/agents`, and the aggregated result is still delivered as a follow-up through the live session API. Branch navigation (e.g. `/back`, `/fork` moves within the session tree), quitting, or switching to another session still aborts running agents.
+An unknown or already-settled id (or a handle that is no longer live) returns a `not found` notice instead of an error. `Ctrl+B` promotes all currently blocking root batches without interrupting their child work; each promoted batch returns a receipt to the blocking tool and one aggregate completion is delivered automatically. If the host editor already uses `Ctrl+B`, remove or override that host mapping explicitly; the pack never edits global keybindings silently.
+
+Detached batches survive `/reload`: the reload keeps the process alive and re-invokes this extension, so the runtime hands its running child sessions off to the reloaded instance instead of aborting them. The agents keep working, their state stays visible in `/agents`, and the aggregated result is still delivered as a follow-up through the live session API. Branch navigation (e.g. `/back`, `/fork` moves within the session tree) or switching to another session still aborts running agents; the host session-shutdown warning reports that active work will stop when the shutdown cannot be vetoed.
 
 ## Session transfer and prompt commands
 

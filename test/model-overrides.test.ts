@@ -6,6 +6,7 @@ import { test } from "node:test";
 import {
   agentsModelOverridesPath,
   createAgentModelOverrideStore,
+  validateAgentModelOverridesFile,
 } from "../src/config/model-overrides.ts";
 
 test("model and thinking overrides persist independently per config, preset, and role", async () => {
@@ -46,6 +47,22 @@ test("legacy string entries load as model-only overrides and merge with thinking
   assert.deepEqual(store.get("/a", "light", "Atlas"), { model: "provider/legacy" });
   store.set("/a", "light", "Atlas", { thinking: "medium" });
   assert.deepEqual(store.get("/a", "light", "Atlas"), { model: "provider/legacy", thinking: "medium" });
+});
+
+test("reload validation rejects malformed override files before apply", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "pi-agent-models-validate-"));
+  const file = agentsModelOverridesPath(home);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ "/a": { light: { Atlas: { model: "valid/model", unexpected: true } } } }));
+  assert.throws(() => validateAgentModelOverridesFile(file), /Invalid model override/);
+});
+
+test("reload validation rejects mixed valid and invalid override fields", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "pi-agent-models-mixed-"));
+  const file = agentsModelOverridesPath(home);
+  await mkdir(path.dirname(file), { recursive: true });
+  await writeFile(file, JSON.stringify({ "/a": { light: { Atlas: { model: "valid/model", thinking: "turbo" } } } }));
+  assert.throws(() => validateAgentModelOverridesFile(file), /Invalid model override/);
 });
 
 test("malformed override entries are ignored and replaced safely", async () => {

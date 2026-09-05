@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { visibleWidth } from "@earendil-works/pi-tui";
 import type { AgentsConfig } from "../src/config/agents.ts";
-import { createSubagentTool } from "../src/tool.ts";
+import { createSubagentTool, formatPromotedReceipt } from "../src/tool.ts";
 
 const config: AgentsConfig = {
   path: "/tmp/.pi/agents.yaml",
@@ -33,6 +33,17 @@ const config: AgentsConfig = {
   presets: [],
 };
 
+test("a promoted foreground result is represented as a background receipt", async () => {
+  const tool = createSubagentTool(
+    config,
+    async () => ({ promoted: true, batchId: "batch-7", agentCount: 2 }),
+  ) as any;
+  const result = await tool.execute("call", { background: false, agents: [{ role: "Scout", task: "T" }] }, undefined);
+  assert.deepEqual(result.details, { promoted: true, batchId: "batch-7", agentCount: 2 });
+  assert.match(result.content[0].text, /batch-7.*promoted/);
+  assert.match(formatPromotedReceipt(result.details), /continue in the background/);
+});
+
 test("tool schema derives role names and descriptions without exposing runtime depth", () => {
   const tool = createSubagentTool(config, async () => ({ batchId: "batch", runs: [], allRuns: [], durationMs: 0 }));
   const schema = JSON.stringify(tool.parameters);
@@ -40,8 +51,23 @@ test("tool schema derives role names and descriptions without exposing runtime d
   assert.match(schema, /Focused exploration/);
   assert.match(schema, /Builder/);
   assert.match(schema, /Minutes; omit for default, -1 for no timeout/);
+  assert.match(schema, /"minimum":1/);
+  assert.match(schema, /"const":-1/);
+  assert.match(schema, /non-whitespace text/);
   assert.doesNotMatch(schema, /background/i, "nested tools do not expose background execution");
   assert.doesNotMatch(`${tool.description}\n${schema}`, /maxDepth|remaining depth|depth available|smaller positive|maximum timeout|images/i);
+});
+
+test("all-disabled tools expose only current-session controls", async () => {
+  const tool = createSubagentTool({ ...config, roles: [] }, async () => {
+    throw new Error("fresh launch must not be callable");
+  }, { controlAction: () => ({ action: "inspect", target: { all: true }, agents: [], batches: [], truncated: false }) as any });
+  const schema = JSON.stringify(tool.parameters);
+  assert.match(schema, /inspect/);
+  assert.match(schema, /cancel/);
+  assert.doesNotMatch(schema, /No enabled roles/);
+  const result = await (tool as any).execute("call", { action: "inspect", target: { all: true } });
+  assert.equal(result.details.action, "inspect");
 });
 
 test("only root tools expose background batches", () => {
@@ -57,110 +83,63 @@ test("only root tools expose background batches", () => {
   assert.doesNotMatch(JSON.stringify(nested.parameters), /background/i);
 });
 
-test("root tools expose the background manage action while nested tools do not", () => {
+test("root and nested tools expose unified inspect/cancel controls without background management", async () => {
   const completion = Promise.resolve({ batchId: "batch", runs: [], allRuns: [], durationMs: 0 });
-  const root = createSubagentTool(
-    config,
-    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
-    {
-      startBackgroundBatch: () => ({ batchId: "bg", completion }),
-      cancelBackgroundTarget: () => "batch",
-    },
-  );
-  const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 }));
-
-  assert.match(JSON.stringify(root.parameters), /"const":"cancel".*[Bb]atch id from the launch receipt, or an agent handle/);
-  assert.match(root.description, /background: \{action: \"cancel\", batchId\}/);
-  assert.doesNotMatch(JSON.stringify(nested.parameters), /background|cancel/i);
-  assert.doesNotMatch(nested.description, /cancel/i);
+  const control: any = (request: any) => request.action === "inspect"
+    ? { action: "inspect", target: request.target, agents: [], batches: [], truncated: false }
+    : { action: "cancel", target: request.target, status: "cancelled", scope: "agent", stopped: 1 };
+  const root = createSubagentTool(config, async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }), {
+    startBackgroundBatch: () => ({ batchId: "bg", completion }),
+    controlAction: control,
+  }) as any;
+  const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 }), { controlAction: control }) as any;
+  assert.match(JSON.stringify(root.parameters), /inspect/);
+  assert.match(JSON.stringify(root.parameters), /cancel/);
+  assert.doesNotMatch(JSON.stringify(root.parameters), /background.*batchId/);
+  assert.match(JSON.stringify(nested.parameters), /inspect/);
+  const result = await nested.execute("call", { action: "inspect", target: { all: true } }, undefined);
+  assert.equal(result.details.action, "inspect");
 });
 
-test("cancelling a live background batch reports cancelled without touching agents", async () => {
-  let cancelled: string | undefined;
-  let backgroundRequests: unknown;
-  const tool = createSubagentTool(
-    config,
-    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
-    {
-      startBackgroundBatch: (requests) => {
-        backgroundRequests = requests;
-        return { batchId: "bg-1", completion: Promise.resolve({ batchId: "bg-1", runs: [], allRuns: [], durationMs: 0 }) };
-      },
-      cancelBackgroundTarget: (batchId) => {
-        cancelled = batchId;
-        return "batch";
-      },
-    },
-  ) as any;
-
-  const result = await tool.execute("call", { background: { action: "cancel", batchId: "bg-1" } }, undefined);
-  assert.equal(cancelled, "bg-1");
-  assert.equal(backgroundRequests, undefined, "cancelling never launches a batch");
-  assert.deepEqual(result.details, { background: true, batchId: "bg-1", status: "cancelled", scope: "batch" });
-  assert.match(result.content[0].text, /bg-1 · cancelled/);
-  assert.match(result.content[0].text, /final result is delivered as a follow-up/);
+test("unified actions reject mixed or malformed shapes and preserve the read-only inspect contract", async () => {
+  let called = 0;
+  const tool = createSubagentTool(config, async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }), {
+    controlAction: (request) => { called += 1; return request.action === "inspect" ? { action: "inspect", target: request.target, agents: [], batches: [], truncated: false } : { action: "cancel", target: request.target, status: "not-found", scope: "agent" }; },
+  }) as any;
+  await assert.rejects(tool.execute("call", { action: "inspect", target: { all: true }, agents: [{ role: "Scout", task: "no" }] }, undefined), /cannot contain agents or background/);
+  await assert.rejects(tool.execute("call", { action: "inspect", target: { agent: "a", batch: "b" } }, undefined), /exactly one/);
+  await assert.rejects(tool.execute("call", { action: "cancel" }, undefined), /requires exactly one/);
+  assert.equal(called, 0);
 });
 
-test("cancelling a single agent by handle reports agent scope without touching the batch", async () => {
-  let cancelled: string | undefined;
-  const tool = createSubagentTool(
-    config,
-    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
-    {
-      startBackgroundBatch: () => ({ batchId: "bg-1", completion: Promise.resolve({ batchId: "bg-1", runs: [], allRuns: [], durationMs: 0 }) }),
-      cancelBackgroundTarget: (target) => {
-        cancelled = target;
-        return target === "vigil-1" ? "agent" : undefined;
-      },
+test("background:false rejects steering before accepting follow-ups", async () => {
+  let accepted = false;
+  const tool = createSubagentTool(config, async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }), {
+    submitFollowups: () => {
+      accepted = true;
+      return { followups: [] };
     },
-  ) as any;
-
-  const result = await tool.execute("call", { background: { action: "cancel", batchId: "vigil-1" } }, undefined);
-  assert.equal(cancelled, "vigil-1");
-  assert.deepEqual(result.details, { background: true, batchId: "vigil-1", status: "cancelled", scope: "agent" });
-  assert.match(result.content[0].text, /vigil-1 · cancelled/);
-  assert.match(result.content[0].text, /rest of its batch keeps running/);
-});
-
-test("cancelling an unknown or already-settled batch reports not found", async () => {
-  let cancelled = false;
-  const tool = createSubagentTool(
-    config,
-    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
-    {
-      startBackgroundBatch: () => ({ batchId: "bg", completion: Promise.resolve({ batchId: "bg", runs: [], allRuns: [], durationMs: 0 }) }),
-      cancelBackgroundTarget: () => {
-        cancelled = true;
-        return undefined;
-      },
-    },
-  ) as any;
-
-  const result = await tool.execute("call", { background: { action: "cancel", batchId: "stale" } }, undefined);
-  assert.equal(cancelled, true, "the runtime is still asked to cancel stale ids");
-  assert.deepEqual(result.details, { background: true, batchId: "stale", status: "not-found" });
-  assert.match(result.content[0].text, /stale · not found/);
-});
-
-test("cancelling rejects mixed agents and nested management is unavailable", async () => {
-  const tool = createSubagentTool(
-    config,
-    async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }),
-    {
-      startBackgroundBatch: () => ({ batchId: "bg", completion: Promise.resolve({ batchId: "bg", runs: [], allRuns: [], durationMs: 0 }) }),
-      cancelBackgroundTarget: () => "batch",
-    },
-  ) as any;
+  }) as any;
   await assert.rejects(
-    tool.execute("call", { background: { action: "cancel", batchId: "bg" }, agents: [{ role: "Scout", task: "no" }] }, undefined),
-    /either agents or a background action, not both/,
+    tool.execute("call", { background: false, agents: [{ agent: "scout-1", messages: [{ message: "interrupt", delivery: "steer" }] }] }),
+    /cannot be combined with steering/,
   );
+  assert.equal(accepted, false);
+});
 
-  const nested = createSubagentTool(config, async () => ({ batchId: "nested", runs: [], allRuns: [], durationMs: 0 })) as any;
-  await assert.rejects(
-    nested.execute("call", { background: { action: "cancel", batchId: "bg" } }, undefined),
-    /only in the root session/,
-  );
+test("queue-only background:false waits for queued outcomes", async () => {
+  let resolved = false;
+  let release!: () => void;
+  const completion = new Promise<any>((resolve) => { release = () => { resolved = true; resolve({ batchId: "queued", runs: [{ role: "Scout", agent: "scout-1", status: "complete", output: "done", durationMs: 1, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, cost: 0 } }], allRuns: [], durationMs: 1 }); }; });
+  const tool = createSubagentTool(config, async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }), {
+    submitFollowups: (_requests, detached) => ({ followups: [{ id: "followup-1", agent: "scout-1", delivery: "queue", status: "accepted", state: "queued" }], ...(detached ? {} : { completion }) }),
+  }) as any;
+  const pending = tool.execute("call", { background: false, agents: [{ agent: "scout-1", messages: [{ message: "continue" }] }] }, undefined);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(resolved, false);
+  release();
+  const result = await pending;
+  assert.match(result.content[0].text, /done/);
 });
 
 test("root delegations default to background and background: false waits inline", async () => {
@@ -209,7 +188,7 @@ test("tool card shows each role and full prompt once without duplicate result me
   const theme = { fg: (_color: string, text: string) => `\x1b[36m${text}\x1b[0m` };
   const call = tool.renderCall({ agents: [
     { role: "Scout", task: "SECRET FRESH", timeoutMinutes: 3 },
-    { agent: "scout-1", task: "SECRET FOLLOWUP" },
+    { agent: "scout-1", messages: [{ message: "SECRET FOLLOWUP" }] },
   ] }, theme).render(120).join("\n");
   assert.match(call, /Subagents.*2/);
   assert.match(call, /Scout.*SECRET FRESH/s);
@@ -266,6 +245,14 @@ test("background execution returns a receipt immediately without awaiting or inv
   assert.deepEqual(result.details, { background: true, batchId: "detached", status: "started", agentCount: 1 });
   assert.match(result.content[0].text, /Results will be delivered automatically.*without polling/);
   resolveCompletion({ batchId: "detached", runs: [], allRuns: [], durationMs: 0 });
+});
+
+test("nested guidance explains owned follow-ups and controls", () => {
+  const tool = createSubagentTool(config, async () => ({ batchId: "sync", runs: [], allRuns: [], durationMs: 0 }), {
+    controlAction: () => ({ action: "inspect", target: { all: true }, agents: [], batches: [], truncated: false }) as any,
+  });
+  assert.match(tool.description, /existing agents this child spawned/);
+  assert.match(tool.description, /only agents and batches owned by this child/);
 });
 
 test("nested tool execution rejects background requests even if schema validation is bypassed", async () => {

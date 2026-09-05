@@ -229,6 +229,28 @@ async function makeEnv(options: { seed?: AccountsFile } = {}): Promise<Env> {
 }
 
 const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 10));
+const nextTimerTurn = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** Wait for a coordinator-backed state change without guessing how long disk I/O takes. */
+async function waitForCondition(env: Env, condition: () => boolean, description: string): Promise<void> {
+  if (condition()) return;
+  await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = env.controller.coordinator.subscribe(() => {
+      if (!condition()) return;
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+      resolve();
+    });
+    timer = setTimeout(() => {
+      unsubscribe();
+      reject(new Error(`Timed out waiting for ${description}.`));
+    }, 1_000);
+  });
+  // The coordinator publishes from updateLimits before pollCodex schedules its
+  // next timer; let that poll finish before the test advances the fake clock.
+  await nextTimerTurn();
+}
 
 /** Fire `session_start` (draining the root's initial poll) with a starting model. */
 async function startSession(env: Env, pi: FakePi, baseModel: Model<any>): Promise<void> {
@@ -762,7 +784,13 @@ test("codex polling fetches usage on the injected schedule and stores near-reset
     },
   });
 
-  await startSession(env, env.rootPi, CODX_BASE_MODEL); // session_start schedules the first poll
+  env.rootPi.session.model = CODX_BASE_MODEL;
+  await env.rootPi.emit("session_start", { reason: "startup" });
+  await waitForCondition(
+    env,
+    () => env.controller.accounts(CODEX).find((account) => account.id === "acct-a")?.limits[0]?.usedPercent === 100,
+    "the initial Codex usage update",
+  );
   assert.equal(env.rootPi.session.model?.provider, aliasA);
   assert.equal(env.fetchCalls.length, 1);
   assert.equal(env.fetchCalls[0]?.url, CODEX_USAGE_URL);
@@ -776,7 +804,11 @@ test("codex polling fetches usage on the injected schedule and stores near-reset
   env.setPayload({ rate_limit: { primary: { used_percent: 50, limit_window_seconds: 3600 } } });
   now += 31_000;
   await env.rootPi.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [], timestamp: now } } as any);
-  await flush();
+  await waitForCondition(
+    env,
+    () => env.fetchCalls.length === 2 && env.controller.accounts(CODEX).find((account) => account.id === "acct-a")?.limits[0]?.usedPercent === 50,
+    "the near-reset Codex usage update",
+  );
   assert.equal(env.fetchCalls.length, 2);
   const refreshed = env.controller.accounts(CODEX).find((acc) => acc.id === "acct-a");
   assert.equal(refreshed?.limits[0]?.usedPercent, 50);
@@ -785,13 +817,13 @@ test("codex polling fetches usage on the injected schedule and stores near-reset
   // Healthy limits push the interval to 5 minutes: +31s does NOT fetch...
   now += 31_000;
   await env.rootPi.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [], timestamp: now } } as any);
-  await flush();
+  await nextTimerTurn();
   assert.equal(env.fetchCalls.length, 2);
 
   // ...but +5min does.
   now += 5 * 60_000 + 1_000;
   await env.rootPi.emit("message_end", { message: { role: "assistant", stopReason: "stop", content: [], timestamp: now } } as any);
-  await flush();
+  await waitForCondition(env, () => env.fetchCalls.length === 3, "the healthy Codex usage poll");
   assert.equal(env.fetchCalls.length, 3);
 });
 
@@ -811,7 +843,14 @@ test("codex polling clears exhaustion markers when a reset window reports health
   assert.equal(a?.exhausted, true);
   assert.equal(env.fetchCalls.length, 0);
 
-  await flush(); // run the initial poll
+  await waitForCondition(
+    env,
+    () => {
+      const account = env.controller.accounts(CODEX).find((candidate) => candidate.id === "acct-a");
+      return account?.limits[0]?.usedPercent === 40 && account.exhausted === false;
+    },
+    "the initial healthy Codex usage update",
+  );
   const refreshed = env.controller.accounts(CODEX).find((acc) => acc.id === "acct-a");
   assert.equal(refreshed?.exhausted, false);
   assert.equal(refreshed?.resetAt, undefined);

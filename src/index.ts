@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, SessionEntry, Theme } from "@earendil-works/pi-coding-agent";
 import {
-  AGENT_BACKENDS,
   AGENTS_CONFIG_FILE_NAME,
   THINKING_LEVELS,
   agentsConfigPath,
@@ -14,7 +13,6 @@ import {
   validateAgentsFile,
 } from "./config/agents.ts";
 import type {
-  AgentBackend,
   AgentRole,
   AgentsConfig,
   AgentsConfigValidation,
@@ -23,7 +21,7 @@ import type {
   ThinkingLevel,
 } from "./config/agents.ts";
 import { createActiveModeStore, resolveActiveMode } from "./config/mode.ts";
-import { createAgentModelOverrideStore, projectAgentsModelOverridesPath } from "./config/model-overrides.ts";
+import { agentsModelOverridesPath, createAgentModelOverrideStore, projectAgentsModelOverridesPath, validateAgentModelOverridesFile } from "./config/model-overrides.ts";
 import {
   BACKGROUND_SUBAGENT_RESULT_TYPE,
   deliverBackgroundBatchResult,
@@ -47,7 +45,7 @@ import { registerEmptyFinalGuard } from "./empty-final-guard.ts";
 import { registerHandoffCommand } from "./handoff.ts";
 import { registerAutoRename } from "./auto-rename.ts";
 import { registerSaveMarkdown } from "./save-md.ts";
-import { SubagentRuntime } from "./runtime/runtime.ts";
+import { migrateRuntimeForReload, SubagentRuntime } from "./runtime/runtime.ts";
 import { replayRuntimeState, SUBAGENT_ENTRY_TYPE } from "./runtime/state.ts";
 import { registerThinkingShortcuts } from "./shortcuts.ts";
 import type { TUI } from "@earendil-works/pi-tui";
@@ -60,7 +58,9 @@ import {
   showAgentModelConfigure,
   type AgentConfigureScope,
   type AgentModelChoice,
+  type AgentRoleConfigState,
   type AgentRoleConfigureChange,
+  type AgentConfigureResult,
 } from "./ui/agents-configure.ts";
 import { createFooterController, contextLabelFor } from "./ui/footer.ts";
 import { installHeader } from "./ui/header.ts";
@@ -112,6 +112,8 @@ type ReloadState = {
   backgroundRunSenders: Map<string, ExtensionAPI["sendMessage"]>;
   /** Session ids whose composer agents panel is minimized to one summary line. */
   minimizedPanels: Set<string>;
+  /** Promoted foreground batches already handed to the one-shot delivery path. */
+  promotedBatchDeliveries: Set<string>;
 };
 
 function reloadState(): ReloadState {
@@ -127,17 +129,18 @@ function reloadState(): ReloadState {
       backgroundRunRegistries: new Map(),
       backgroundRunSenders: new Map(),
       minimizedPanels: new Set(),
+      promotedBatchDeliveries: new Set(),
     };
     global[RELOAD_STATE_KEY] = state;
   }
   // A reload adopts the state an older extension instance created, which may
   // lack fields added since. Backfill so consumers never read undefined.
   state.minimizedPanels ??= new Set();
+  state.promotedBatchDeliveries ??= new Set();
   return state;
 }
 
 export {
-  AGENT_BACKENDS,
   AGENTS_CONFIG_FILE_NAME,
   THINKING_LEVELS,
   agentsConfigPath,
@@ -152,7 +155,6 @@ export {
   validateAgentsFile,
 };
 export type {
-  AgentBackend,
   AgentRole,
   AgentsConfig,
   AgentsConfigValidation,
@@ -165,14 +167,14 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   const reload = reloadState();
   // Closure-local aliases of the process-global handoff registries: each
   // reloaded module instance sees the same Map/array objects.
-  const { detachedRuntimes, detachedEventBuffer, sessionRuntimes, sessionSenders, bufferedFollowUps, backgroundRunRegistries, backgroundRunSenders, minimizedPanels } = reload;
+  const { detachedRuntimes, detachedEventBuffer, sessionRuntimes, sessionSenders, bufferedFollowUps, backgroundRunRegistries, backgroundRunSenders, minimizedPanels, promotedBatchDeliveries } = reload;
   let runtime: SubagentRuntime | undefined;
   let currentConfig: AgentsConfig | undefined;
   let registered = false;
   const activeModeStore = createActiveModeStore();
   const modelOverrideStore = createAgentModelOverrideStore(undefined, undefined, "$global");
   let projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(), "$project");
-  let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel; backend?: AgentBackend }>();
+  let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel }>();
   let configureScope: AgentConfigureScope = "session";
   const accounts = createAccountController(pi);
   const footer = createFooterController(pi, {
@@ -309,15 +311,20 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
     const previous = runtime;
     runtime = undefined;
+    projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(ctx.cwd), "$project");
 
     let next: SubagentRuntime;
-    const adopted = detachedRuntimes.get(sessionId);
-    if (adopted) {
+    const adoptedCandidate = detachedRuntimes.get(sessionId);
+    if (adoptedCandidate) {
       // A reload handed this runtime off with its child sessions still running.
+      // Upgrade legacy module state before invoking any methods added by the
+      // fresh module. The migration initializes new collections and rejects an
+      // incompatible object instead of silently abandoning live work.
+      const adopted = migrateRuntimeForReload(adoptedCandidate);
+      detachedRuntimes.delete(sessionId);
       // Adopt it: persist events recorded during the handoff gap, re-point the
       // extension-bound hooks at this live instance, and realign with the
       // freshly loaded config (a preset may have been renamed or removed).
-      detachedRuntimes.delete(sessionId);
       const buffered = detachedEventBuffer.get(sessionId) ?? [];
       detachedEventBuffer.delete(sessionId);
       adopted.rebindForReload({
@@ -337,6 +344,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           const session = sessionOverrides.get(key);
           if (!global && !project && !session) return undefined;
           return { ...global, ...project, ...session };
+        },
+        deliverQueuedBatch: (launch) => {
+          void deliverBackgroundBatchResult(
+            launch,
+            (message, options) => sessionSenders.get(sessionId)?.(message, options),
+            () => sessionRuntimes.get(sessionId) === adopted,
+          );
         },
       });
       try {
@@ -361,7 +375,6 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
       const allState = replayRuntimeState(ctx.sessionManager.getEntries());
       const activeState = replayRuntimeState(ctx.sessionManager.getBranch());
-      projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(ctx.cwd), "$project");
       sessionOverrides = new Map();
       next = new SubagentRuntime(
         {
@@ -387,6 +400,13 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           ),
           accountExtension: accounts.childExtension,
           routeAccountModel: accounts.routeModel,
+          deliverQueuedBatch: (launch) => {
+            void deliverBackgroundBatchResult(
+              launch,
+              (message, options) => sessionSenders.get(sessionId)?.(message, options),
+              () => sessionRuntimes.get(sessionId) === next,
+            );
+          },
         },
         activeState,
       );
@@ -421,6 +441,16 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           return runtime.runRootBatch(requests, signal, onProgress);
         },
         {
+          validateRequests: (requests) => {
+            const owner = runtime;
+            if (!owner) throw new Error("Subagent runtime is not available for this session.");
+            owner.validateSubmission(requests);
+          },
+          submitFollowups: (requests, detached) => {
+            const owner = runtime;
+            if (!owner) throw new Error("Subagent runtime is not available for this session.");
+            return owner.submitFollowups(requests, undefined, detached);
+          },
           startBackgroundBatch: (requests) => {
             const owner = runtime;
             if (!owner) throw new Error("Subagent runtime is not available for this session.");
@@ -435,10 +465,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             );
             return launch;
           },
-          cancelBackgroundTarget: (target) => {
+          controlAction: (request) => {
             const owner = runtime;
             if (!owner) throw new Error("Subagent runtime is not available for this session.");
-            return owner.cancelRootTarget(target);
+            return owner.controlAction(request);
           },
         },
       ),
@@ -523,6 +553,39 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     if (config) await activate(ctx, config, activeMode);
   });
 
+  pi.registerShortcut("ctrl+b", {
+    description: "Promote all blocking subagent batches to the background",
+    handler: (ctx) => {
+      const owner = runtime;
+      if (!owner) {
+        ctx.ui.notify("Subagent runtime is unavailable for this session.", "warning");
+        return;
+      }
+      const sessionId = owner.options.rootSessionId;
+      const candidates = owner.promotableRootBatches().filter((batch) => !batch.promoted);
+      let promoted = 0;
+      for (const candidate of candidates) {
+        const result = owner.promoteRootBatch(candidate.batchId);
+        if (result.status !== "promoted") continue;
+        const key = `${sessionId}\u0000${result.batchId}`;
+        if (promotedBatchDeliveries.has(key)) continue;
+        promotedBatchDeliveries.add(key);
+        promoted += 1;
+        void deliverBackgroundBatchResult(
+          result.launch,
+          (message, options) => sessionSenders.get(sessionId)?.(message, options),
+          () => sessionRuntimes.get(sessionId) === owner,
+        );
+      }
+      ctx.ui.notify(
+        promoted === 0
+          ? "No blocking subagent batches are available to promote."
+          : `Promoted ${promoted} subagent batch${promoted === 1 ? "" : "es"} to the background.`,
+        "info",
+      );
+    },
+  });
+
   pi.registerShortcut("alt+m", {
     description: "Minimize or expand the agents panel",
     handler: (ctx) => {
@@ -565,65 +628,72 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           ctx.ui.notify("The agents model picker requires TUI mode.", "warning");
           return;
         }
-        const configured = resolvePreset(active.options.config, active.activeMode).roles;
-        const mode = active.activeMode;
-        const configPath = active.options.config.path;
-        const applyChange = (roleName: string, change: AgentRoleConfigureChange): void => {
-          const role = configured.find((candidate) => candidate.name === roleName);
-          if (!role) return;
-          const key = `${mode ?? "$default"}\u0000${role.name}`;
-          if (configureScope === "session") {
-            const previous = sessionOverrides.get(key) ?? {};
-            const next = { ...previous };
-            if (change.kind === "model") next.model = change.model;
-            else if (change.kind === "thinking") next.thinking = change.thinking;
-            else if (change.kind === "backend") next.backend = change.backend;
-            else if (change.kind === "reset-model") delete next.model;
-            else if (change.kind === "reset-thinking") delete next.thinking;
-            else if (change.kind === "reset-backend") delete next.backend;
-            if (Object.keys(next).length) sessionOverrides.set(key, next); else sessionOverrides.delete(key);
-          } else {
-            const store = configureScope === "project" ? projectOverrideStore : modelOverrideStore;
-            switch (change.kind) {
-              case "model": store.set(configPath, mode, role.name, { model: change.model }); break;
-              case "thinking": store.set(configPath, mode, role.name, { thinking: change.thinking }); break;
-              case "reset-model": store.set(configPath, mode, role.name, { model: undefined }); break;
-              case "reset-thinking": store.set(configPath, mode, role.name, { thinking: undefined }); break;
-              case "backend":
-              case "reset-backend":
-                throw new Error("Backend selection is session-scoped.");
-            }
-          }
-          active.refreshRoles();
-          ctx.ui.notify(`${role.name} ${describeConfigureChange(change)}`, "info");
-        };
-        await showAgentModelConfigure(
-          ctx,
-          {
-            mode,
+        const configureInput = (): { mode: string | undefined; scope: AgentConfigureScope; roles: AgentRoleConfigState[]; scopedModels: AgentModelChoice[]; allModels: AgentModelChoice[] } => {
+          const configured = resolvePreset(active.options.config, active.activeMode).roles;
+          return {
+            mode: active.activeMode,
             scope: configureScope,
-            roles: active.activeRoles.map((role) => {
+            roles: active.configuredRoles.map((role) => {
               const base = configured.find((candidate) => candidate.name === role.name);
               return {
                 name: role.name,
+                enabled: !active.isRoleDisabled(role.name),
                 model: role.model,
                 thinking: role.thinking,
                 configuredModel: base?.model ?? role.model,
                 configuredThinking: base?.thinking ?? role.thinking,
-                backend: role.backend ?? "native",
-                configuredBackend: base?.backend ?? role.backend ?? "native",
-                backendOptions: role.backendOptions ?? [role.backend ?? "native"],
               };
             }),
             scopedModels: projectAgentModels(ctx.scopedModels.map((item) => item.model), ctx),
             allModels: projectAgentModels(ctx.modelRegistry.getAll(), ctx),
-          },
-          applyChange,
-          (scope) => { configureScope = scope; },
-          (scope) => {
+          };
+        };
+        const refreshRootTool = (): void => {
+          registerSubagentTool({ ...active.options.config, roles: [...active.activeRoles] });
+        };
+        const applyChange = (roleName: string, change: AgentRoleConfigureChange): AgentConfigureResult => {
+          const role = active.configuredRoles.find((candidate) => candidate.name === roleName);
+          if (!role) return { error: `Role ${roleName} is not active in this preset.` };
+          if (change.kind === "enabled") {
+            const disabled = [...active.disabledRoles].filter((name) => name.toLowerCase() !== role.name.toLowerCase());
+            if (!change.enabled) disabled.push(role.name);
+            active.setDisabledRoles(disabled);
+          } else {
+            const mode = active.activeMode;
+            const key = `${mode ?? "$default"}\u0000${role.name}`;
+            if (configureScope === "session") {
+              const previous = sessionOverrides.get(key) ?? {};
+              const next = { ...previous };
+              if (change.kind === "model") next.model = change.model;
+              else if (change.kind === "thinking") next.thinking = change.thinking;
+              else if (change.kind === "reset-model") delete next.model;
+              else if (change.kind === "reset-thinking") delete next.thinking;
+              if (Object.keys(next).length) sessionOverrides.set(key, next); else sessionOverrides.delete(key);
+            } else {
+              const store = configureScope === "project" ? projectOverrideStore : modelOverrideStore;
+              const configPath = active.options.config.path;
+              switch (change.kind) {
+                case "model": store.set(configPath, mode, role.name, { model: change.model }); break;
+                case "thinking": store.set(configPath, mode, role.name, { thinking: change.thinking }); break;
+                case "reset-model": store.set(configPath, mode, role.name, { model: undefined }); break;
+                case "reset-thinking": store.set(configPath, mode, role.name, { thinking: undefined }); break;
+              }
+            }
+            active.refreshRoles();
+            ctx.ui.notify(`${role.name} ${describeConfigureChange(change)}`, "info");
+          }
+          refreshRootTool();
+          return {};
+        };
+        await showAgentModelConfigure(ctx, configureInput(), {
+          refresh: configureInput,
+          onChange: applyChange,
+          onScopeChange: (scope) => { configureScope = scope; },
+          onSaveDefaults: (scope): AgentConfigureResult => {
+            const mode = active.activeMode;
+            const configPath = active.options.config.path;
             let saved = 0;
-            for (const role of active.activeRoles) {
-              if (!configured.some((candidate) => candidate.name === role.name)) continue;
+            for (const role of active.configuredRoles) {
               if (scope === "session") {
                 sessionOverrides.set(`${mode ?? "$default"}\u0000${role.name}`, { model: role.model, thinking: role.thinking });
               } else {
@@ -633,31 +703,49 @@ export default function subagentExtension(pi: ExtensionAPI): void {
               saved += 1;
             }
             active.refreshRoles();
-            ctx.ui.notify(`Saved ${saved} role${saved === 1 ? "" : "s"} to ${scope} config`, "info");
+            refreshRootTool();
+            ctx.ui.notify(`Saved ${saved} role${saved === 1 ? "" : "s"} model/thinking default${saved === 1 ? "" : "s"} to ${scope}`, "info");
+            return {};
           },
-          () => {
+          onReload: (): AgentConfigureResult => {
             try {
+              // Parse and validate everything first. No live pointer or session
+              // override changes occur until the candidate is known-good.
               const fresh = loadAgentsConfig({ cwd: ctx.cwd });
               if (fresh.path === projectAgentsPath(ctx.cwd) && !ctx.isProjectTrusted()) {
                 throw new Error("Project agents.yaml is disabled because this project is not trusted.");
               }
+              validateAgentModelOverridesFile(agentsModelOverridesPath());
+              validateAgentModelOverridesFile(projectAgentsModelOverridesPath(ctx.cwd));
+              const savedMode = resolveActiveMode(fresh, activeModeStore.load(fresh.path));
+              resolvePreset(fresh, savedMode);
+              const nextProjectStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(ctx.cwd), "$project");
+              const nextRoleOverride = (preset: string | undefined, role: string) => {
+                const key = `${preset ?? "$default"}\u0000${role}`;
+                const global = modelOverrideStore.get(fresh.path, preset, role);
+                const project = nextProjectStore.get(fresh.path, preset, role);
+                const session = sessionOverrides.get(key);
+                if (!global && !project && !session) return undefined;
+                return { ...global, ...project, ...session };
+              };
+              // Apply the complete candidate atomically from the UI's point of view.
+              projectOverrideStore = nextProjectStore;
+              active.rebindForReload({ config: fresh, roleOverride: nextRoleOverride });
               currentConfig = fresh;
-              active.rebindForReload({ config: fresh });
-              const mode = active.activeMode;
-              try {
-                active.setActiveMode(mode);
-              } catch {
-                active.setActiveMode(undefined);
-              }
-              // Pick up models.json/auth edits too; in-flight children keep theirs.
+              sessionOverrides = new Map();
+              active.setDisabledRoles([]);
+              active.setActiveMode(savedMode);
               active.resetModelRuntime();
               active.refreshRoles();
+              registerSubagentTool({ ...fresh, roles: [...active.activeRoles] });
+              installHeader(ctx, fresh, pi.getCommands(), active);
               ctx.ui.notify(`Reloaded configs from ${fresh.path}`, "info");
+              return {};
             } catch (error) {
-              notifyError(ctx, error);
+              return { error: error instanceof Error ? error.message : String(error) };
             }
           },
-        );
+        });
         return;
       }
       if (command) {
@@ -783,6 +871,17 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     }
     footer.dispose();
     const active = runtime;
+    if (active) {
+      const unfinished = [...active.state.invocations.values()].filter((invocation) => invocation.status === "queued" || invocation.status === "running").length;
+      if (unfinished > 0) {
+        ctx.ui.notify(
+          event.reason === "reload"
+            ? `${unfinished} subagent invocation${unfinished === 1 ? "" : "s"} will continue during reload; the next extension instance will adopt them.`
+            : `${unfinished} subagent invocation${unfinished === 1 ? "" : "s"} will be stopped during session shutdown. The shutdown cannot be vetoed.`,
+          "warning",
+        );
+      }
+    }
     runtime = undefined;
     if (event.reason === "reload" && active) {
       // Reload keeps the process alive and re-invokes this extension. Hand the
@@ -832,12 +931,11 @@ function backgroundRunsLabel(registry: BackgroundRunRegistry | undefined, theme:
 
 function describeConfigureChange(change: AgentRoleConfigureChange): string {
   switch (change.kind) {
+    case "enabled": return change.enabled ? "enabled for new work" : "disabled for new work";
     case "model": return `model: ${change.model}`;
     case "thinking": return `thinking: ${change.thinking}`;
     case "reset-model": return "model reset to configured";
     case "reset-thinking": return "thinking reset to configured";
-    case "backend": return `backend: ${change.backend}`;
-    case "reset-backend": return "backend reset to configured";
   }
 }
 

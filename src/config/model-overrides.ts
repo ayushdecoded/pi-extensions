@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { THINKING_LEVELS, type AgentBackend, type ThinkingLevel } from "./agents.ts";
+import { THINKING_LEVELS, type ThinkingLevel } from "./agents.ts";
 
 export const AGENTS_MODEL_OVERRIDES_FILE_NAME = "agents-model-overrides.json";
 const NO_PRESET = "$default";
@@ -10,11 +10,6 @@ const NO_PRESET = "$default";
 export type RoleOverride = {
   model?: string;
   thinking?: ThinkingLevel;
-};
-
-/** Session-only execution override; backend is never persisted to disk. */
-export type SessionRoleOverride = RoleOverride & {
-  backend?: AgentBackend;
 };
 
 // File shape: { [configPath]: { [scope]: { [role]: string | { model?, thinking? } } } }
@@ -88,6 +83,46 @@ export function createAgentModelOverrideStore(
       fs.writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`, "utf8");
     },
   };
+}
+
+/** Validate persisted override data before a reload applies any candidate state. */
+export function validateAgentModelOverridesFile(file: string): void {
+  if (!fs.existsSync(file)) return;
+  let value: unknown;
+  try {
+    value = JSON.parse(fs.readFileSync(file, "utf8")) as unknown;
+  } catch (error) {
+    throw new Error(`Invalid model overrides file ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid model overrides file ${file}: expected an object.`);
+  }
+  for (const [configPath, scopes] of Object.entries(value)) {
+    if (!scopes || typeof scopes !== "object" || Array.isArray(scopes)) throw new Error(`Invalid model overrides scope for ${configPath}.`);
+    for (const [scope, roles] of Object.entries(scopes)) {
+      if (!roles || typeof roles !== "object" || Array.isArray(roles)) throw new Error(`Invalid model overrides roles for ${configPath}/${scope}.`);
+      for (const [role, entry] of Object.entries(roles)) {
+        if (typeof entry === "string") {
+          if (!/^\S+\/\S+$/.test(entry)) throw new Error(`Invalid model override for ${configPath}/${scope}/${role}.`);
+          continue;
+        }
+        if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`Invalid model override for ${configPath}/${scope}/${role}.`);
+        const record = entry as Record<string, unknown>;
+        const keys = Object.keys(record);
+        const validModel = !("model" in record) || (typeof record.model === "string" && /^\S+\/\S+$/.test(record.model));
+        const validThinking = !("thinking" in record) || (typeof record.thinking === "string" && (THINKING_LEVELS as readonly string[]).includes(record.thinking));
+        if (
+          keys.some((key) => key !== "model" && key !== "thinking") ||
+          keys.length === 0 ||
+          !validModel ||
+          !validThinking ||
+          parseRoleOverride(entry) === undefined
+        ) {
+          throw new Error(`Invalid model override for ${configPath}/${scope}/${role}.`);
+        }
+      }
+    }
+  }
 }
 
 function scopeKey(preset: string | undefined): string {
