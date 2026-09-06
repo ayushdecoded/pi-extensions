@@ -174,7 +174,7 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   const activeModeStore = createActiveModeStore();
   const modelOverrideStore = createAgentModelOverrideStore(undefined, undefined, "$global");
   let projectOverrideStore = createAgentModelOverrideStore(undefined, projectAgentsModelOverridesPath(), "$project");
-  let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel }>();
+  let sessionOverrides = new Map<string, { model?: string; thinking?: ThinkingLevel; enabled?: boolean }>();
   let configureScope: AgentConfigureScope = "session";
   const accounts = createAccountController(pi);
   const footer = createFooterController(pi, {
@@ -358,6 +358,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       } catch {
         adopted.setActiveMode(undefined);
       }
+      // Full /reload drops session-scoped overrides just like the in-panel
+      // reload, while project/global enablement remains in the callback above.
+      sessionOverrides = new Map();
+      adopted.setDisabledRoles([]);
       adopted.refreshRoles();
       // Reload resets the provider registry; rebuild the shared model runtime
       // so new child sessions resolve the freshly registered providers.
@@ -542,7 +546,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
     registerBackgroundBashTool(ctx.cwd);
     footer.setCodexWeeklyRemaining(codexWeeklyRemaining(accounts));
     if (!registered) {
-      registerSubagentTool({ ...config, roles: resolvePreset(config, activeMode).roles });
+      // The root schema must reflect persisted enablement at startup, not only
+      // the raw preset role list. Disabled roles remain configure-visible but
+      // are hidden from fresh delegation requests.
+      registerSubagentTool({ ...config, roles: [...runtime!.activeRoles] });
       registered = true;
     }
   });
@@ -628,6 +635,21 @@ export default function subagentExtension(pi: ExtensionAPI): void {
           ctx.ui.notify("The agents model picker requires TUI mode.", "warning");
           return;
         }
+        const enabledAt = (scope: AgentConfigureScope, preset: string | undefined, role: string): boolean | undefined => {
+          if (scope === "session") return sessionOverrides.get(`${preset ?? "$default"}\u0000${role}`)?.enabled;
+          const store = scope === "project" ? projectOverrideStore : modelOverrideStore;
+          return store.get(active.options.config.path, preset, role)?.enabled;
+        };
+        const inheritedEnabled = (preset: string | undefined, role: string): boolean => {
+          const lowerScopes: AgentConfigureScope[] = configureScope === "session"
+            ? ["project", "global"]
+            : configureScope === "project" ? ["global"] : [];
+          for (const scope of lowerScopes) {
+            const value = enabledAt(scope, preset, role);
+            if (value !== undefined) return value;
+          }
+          return true;
+        };
         const configureInput = (): { mode: string | undefined; scope: AgentConfigureScope; roles: AgentRoleConfigState[]; scopedModels: AgentModelChoice[]; allModels: AgentModelChoice[] } => {
           const configured = resolvePreset(active.options.config, active.activeMode).roles;
           return {
@@ -638,6 +660,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
               return {
                 name: role.name,
                 enabled: !active.isRoleDisabled(role.name),
+                configuredEnabled: inheritedEnabled(active.activeMode, role.name),
+                enabledOverridden: enabledAt(configureScope, active.activeMode, role.name) !== undefined,
                 model: role.model,
                 thinking: role.thinking,
                 configuredModel: base?.model ?? role.model,
@@ -654,10 +678,23 @@ export default function subagentExtension(pi: ExtensionAPI): void {
         const applyChange = (roleName: string, change: AgentRoleConfigureChange): AgentConfigureResult => {
           const role = active.configuredRoles.find((candidate) => candidate.name === roleName);
           if (!role) return { error: `Role ${roleName} is not active in this preset.` };
-          if (change.kind === "enabled") {
-            const disabled = [...active.disabledRoles].filter((name) => name.toLowerCase() !== role.name.toLowerCase());
-            if (!change.enabled) disabled.push(role.name);
-            active.setDisabledRoles(disabled);
+          if (change.kind === "enabled" || change.kind === "reset-enabled") {
+            const mode = active.activeMode;
+            const key = `${mode ?? "$default"}\u0000${role.name}`;
+            if (configureScope === "session") {
+              const previous = sessionOverrides.get(key) ?? {};
+              const next = { ...previous };
+              if (change.kind === "enabled") next.enabled = change.enabled;
+              else delete next.enabled;
+              if (Object.keys(next).length) sessionOverrides.set(key, next); else sessionOverrides.delete(key);
+            } else {
+              const store = configureScope === "project" ? projectOverrideStore : modelOverrideStore;
+              store.set(active.options.config.path, mode, role.name, {
+                enabled: change.kind === "enabled" ? change.enabled : undefined,
+              });
+            }
+            active.refreshRoles();
+            ctx.ui.notify(`${role.name} ${describeConfigureChange(change)}`, "info");
           } else {
             const mode = active.activeMode;
             const key = `${mode ?? "$default"}\u0000${role.name}`;
@@ -695,16 +732,16 @@ export default function subagentExtension(pi: ExtensionAPI): void {
             let saved = 0;
             for (const role of active.configuredRoles) {
               if (scope === "session") {
-                sessionOverrides.set(`${mode ?? "$default"}\u0000${role.name}`, { model: role.model, thinking: role.thinking });
+                sessionOverrides.set(`${mode ?? "$default"}\u0000${role.name}`, { model: role.model, thinking: role.thinking, enabled: !active.isRoleDisabled(role.name) });
               } else {
                 const store = scope === "project" ? projectOverrideStore : modelOverrideStore;
-                store.set(configPath, mode, role.name, { model: role.model, thinking: role.thinking });
+                store.set(configPath, mode, role.name, { model: role.model, thinking: role.thinking, enabled: !active.isRoleDisabled(role.name) });
               }
               saved += 1;
             }
             active.refreshRoles();
             refreshRootTool();
-            ctx.ui.notify(`Saved ${saved} role${saved === 1 ? "" : "s"} model/thinking default${saved === 1 ? "" : "s"} to ${scope}`, "info");
+            ctx.ui.notify(`Saved ${saved} role${saved === 1 ? "" : "s"} model/thinking/enabled default${saved === 1 ? "" : "s"} to ${scope}`, "info");
             return {};
           },
           onReload: (): AgentConfigureResult => {
@@ -936,6 +973,7 @@ function describeConfigureChange(change: AgentRoleConfigureChange): string {
     case "thinking": return `thinking: ${change.thinking}`;
     case "reset-model": return "model reset to configured";
     case "reset-thinking": return "thinking reset to configured";
+    case "reset-enabled": return "enablement reset to inherited";
   }
 }
 

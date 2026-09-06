@@ -98,6 +98,7 @@ function harness(source = baseInput()): Harness {
         else if (change.kind === "enabled") target.enabled = change.enabled;
         else if (change.kind === "reset-model") target.model = target.configuredModel;
         else if (change.kind === "reset-thinking") target.thinking = target.configuredThinking;
+        else if (change.kind === "reset-enabled") target.enabled = target.configuredEnabled ?? true;
       }
       return {};
     },
@@ -216,11 +217,12 @@ test("applied changes adopt refreshed host state, not local guesses", () => {
   assert.match(plain(output(subject, 100)), /Atlas\s+disabled/, "role list reflects the adopted change");
 });
 
-test("the enabled toggle is session-only regardless of the chosen scope", () => {
+test("the enabled toggle uses the selected scope", () => {
   const { subject, seen } = harness();
   subject.handleInput(RIGHT); // scope -> project
   assert.deepEqual(seen.scopeChanges, ["project"]);
   subject.handleInput(ENTER); // Atlas -> settings
+  assert.match(plain(output(subject, 84)), /Enabled · project\s+on/);
   subject.handleInput(ENTER); // toggle Enabled
   assert.deepEqual(seen.changes, [{ role: "Atlas", change: { kind: "enabled", enabled: false } }]);
   subject.handleInput(ENTER); // toggle back
@@ -273,6 +275,22 @@ test("reset rows appear only for fields that differ from the persisted baseline"
   subject.handleInput(ENTER);
   assert.deepEqual(seen.changes, [{ role: "Vigil", change: { kind: "reset-model" } }]);
   assert.match(plain(output(subject, 100)), /Vigil\s+deep · high/, "the override dot clears after the reset");
+});
+
+test("reset enabled is offered when the selected scope differs from its inherited value", () => {
+  const input = baseInput();
+  input.scope = "project";
+  input.roles[0]!.enabled = false;
+  input.roles[0]!.configuredEnabled = true;
+  const { subject, seen } = harness(input);
+  subject.handleInput(ENTER); // Atlas -> settings
+  subject.handleInput(DOWN);
+  subject.handleInput(DOWN);
+  subject.handleInput(DOWN); // Reset enabled
+  assert.match(plain(output(subject, 84)), /Reset enabled\s+→ on/);
+  subject.handleInput(ENTER);
+  assert.deepEqual(seen.changes, [{ role: "Atlas", change: { kind: "reset-enabled" } }]);
+  assert.match(plain(output(subject, 84)), /Enabled · project\s+on/);
 });
 
 test("Escape walks back through panes and Escape on the role list closes", () => {

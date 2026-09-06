@@ -9,8 +9,12 @@ const SCOPES: readonly AgentConfigureScope[] = ["session", "project", "global"];
 /** Display state for one role. The host owns this data; the panel only renders it. */
 export type AgentRoleConfigState = {
   name: string;
-  /** Session-only enablement: disabled roles block future dispatch; running roles finish. */
+  /** Effective enablement: disabled roles block future dispatch; running roles finish. */
   enabled: boolean;
+  /** Enablement inherited from lower scopes, used for the selected-scope reset row. */
+  configuredEnabled?: boolean;
+  /** Whether the selected scope has an explicit enablement value, even if it matches inheritance. */
+  enabledOverridden?: boolean;
   /** Effective model/thinking (persisted defaults plus overrides, resolved by the host). */
   model: string;
   thinking: string;
@@ -43,7 +47,8 @@ export type AgentRoleConfigureChange =
   | { kind: "model"; model: string }
   | { kind: "thinking"; thinking: ThinkingLevel }
   | { kind: "reset-model" }
-  | { kind: "reset-thinking" };
+  | { kind: "reset-thinking" }
+  | { kind: "reset-enabled" };
 
 /** Outcome of a host action. A non-empty `error` stays visible in the panel. */
 export type AgentConfigureResult = { error?: string };
@@ -62,7 +67,7 @@ export type AgentConfigureCallbacks = {
   onScopeChange?: (scope: AgentConfigureScope) => void;
   /** Explicit "save as defaults" for every role at the given scope. */
   onSaveDefaults?: (scope: AgentConfigureScope) => AgentConfigureResult | void | Promise<AgentConfigureResult | void>;
-  /** Re-read agents.yaml plus model overrides. Errors are displayed; the prior state is kept. */
+  /** Re-read agents.yaml plus role overrides. Errors are displayed; the prior state is kept. */
   onReload?: () => AgentConfigureResult | void | Promise<AgentConfigureResult | void>;
 };
 
@@ -73,6 +78,7 @@ type SettingsItem =
   | { kind: "thinking" }
   | { kind: "reset-model" }
   | { kind: "reset-thinking" }
+  | { kind: "reset-enabled" }
   | { kind: "back" };
 type PickerItem = { kind: "pick-model"; choice: AgentModelChoice } | { kind: "pick-thinking"; level: ThinkingLevel };
 type Item = RolesItem | SettingsItem | PickerItem;
@@ -329,7 +335,7 @@ export class AgentModelConfigurePanel implements Component {
       const role = this.selectedRole();
       const on = role?.enabled ?? true;
       const right = on ? this.theme.fg("success", "on") : this.theme.fg("warning", "off · blocks new work");
-      return layoutRow(`${lead}${this.theme.fg("text", "Enabled · session")}`, right, width);
+      return layoutRow(`${lead}${this.theme.fg("text", `Enabled · ${this.scope}`)}`, right, width);
     }
     if (item.kind === "model") {
       const current = this.selectedRole()?.model ?? "";
@@ -344,6 +350,10 @@ export class AgentModelConfigurePanel implements Component {
     }
     if (item.kind === "reset-thinking") {
       return layoutRow(`${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset thinking")}`, this.theme.fg("dim", `→ ${this.selectedRole()?.configuredThinking ?? ""}`), width);
+    }
+    if (item.kind === "reset-enabled") {
+      const inherited = this.selectedRole()?.configuredEnabled ?? true;
+      return layoutRow(`${lead}${this.theme.fg("accent", "↺")} ${this.theme.fg("text", "Reset enabled")}`, this.theme.fg("dim", `→ ${inherited ? "on" : "off"}`), width);
     }
     if (item.kind === "back") {
       return `${lead}${this.theme.fg("success", "✓")} ${this.theme.fg("text", "Done")}`;
@@ -377,6 +387,7 @@ export class AgentModelConfigurePanel implements Component {
     const items: SettingsItem[] = [{ kind: "enabled" }, { kind: "model" }, { kind: "thinking" }];
     if (role.model !== role.configuredModel) items.push({ kind: "reset-model" });
     if (role.thinking !== role.configuredThinking) items.push({ kind: "reset-thinking" });
+    if (role.enabledOverridden || role.enabled !== (role.configuredEnabled ?? true)) items.push({ kind: "reset-enabled" });
     items.push({ kind: "back" });
     return items;
   }
@@ -458,6 +469,8 @@ export class AgentModelConfigurePanel implements Component {
         this.emit(role, { kind: "reset-model" });
       } else if (item.kind === "reset-thinking") {
         this.emit(role, { kind: "reset-thinking" });
+      } else if (item.kind === "reset-enabled") {
+        this.emit(role, { kind: "reset-enabled" });
       } else {
         this.backToRoles();
       }
@@ -533,6 +546,8 @@ export class AgentModelConfigurePanel implements Component {
   private cycleScope(delta: 1 | -1): void {
     this.scope = SCOPES[(SCOPES.indexOf(this.scope) + delta + SCOPES.length) % SCOPES.length]!;
     this.callbacks.onScopeChange?.(this.scope);
+    // The effective value and inherited reset baseline can differ by scope.
+    this.adopt(this.callbacks.refresh());
     this.pickerIndex = clampIndex(this.pickerIndex, this.pickerItems().length);
     this.tui.requestRender();
   }

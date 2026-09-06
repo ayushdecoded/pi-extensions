@@ -144,6 +144,41 @@ test("persisted role overrides apply model and thinking and refresh immediately"
   assert.equal(updates, 2);
 });
 
+test("persisted enablement follows the override callback across refreshes and presets", () => {
+  const selected = new Map<string, RoleOverride>([["deep:Atlas", { enabled: false }]]);
+  const config = {
+    path: "/tmp/agents-enabled.yaml",
+    version: 1,
+    defaults: { maxDepth: 1, concurrency: 1, timeoutMinutes: 10 },
+    defaultPreset: "deep",
+    roles: [{
+      name: "Atlas", description: "Explore", model: "provider/base", thinking: "medium",
+      promptPath: "agents/atlas.md", promptFile: "/tmp/atlas.md", tools: ["read"], delegates: [],
+    }],
+    presets: [
+      { name: "deep", roleNames: ["Atlas"], overrides: new Map() },
+      { name: "light", roleNames: ["Atlas"], overrides: new Map() },
+    ],
+  } as unknown as AgentsConfig;
+  const runtime = new SubagentRuntime({
+    rootSessionId: "enabled-root",
+    cwd: "/tmp",
+    config,
+    activeMode: "deep",
+    roleOverride: (preset, role) => selected.get(`${preset}:${role}`),
+    modelRegistry: {} as any,
+    appendEvent: () => {},
+  });
+
+  assert.equal(runtime.activeRoles.length, 0, "a persisted false hides the role from the root policy");
+  assert.deepEqual([...runtime.disabledRoles], ["Atlas"]);
+  selected.set("deep:Atlas", { enabled: true });
+  runtime.refreshRoles();
+  assert.deepEqual(runtime.activeRoles.map((role) => role.name), ["Atlas"]);
+  runtime.setActiveMode("light");
+  assert.deepEqual(runtime.activeRoles.map((role) => role.name), ["Atlas"], "a preset without an override inherits enabled");
+});
+
 test("configured timeouts are defaults rather than maximum limits", () => {
   const runtime = validationRuntime([]);
   const atlas = runtime.options.config.roles[0]!;

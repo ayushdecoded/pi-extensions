@@ -6,14 +6,15 @@ import { THINKING_LEVELS, type ThinkingLevel } from "./agents.ts";
 export const AGENTS_MODEL_OVERRIDES_FILE_NAME = "agents-model-overrides.json";
 const NO_PRESET = "$default";
 
-/** One role's persisted UI override: model and/or thinking. Omitted fields keep the preset value. */
+/** One role's persisted UI override. Omitted fields keep the lower-scope or preset value. */
 export type RoleOverride = {
   model?: string;
   thinking?: ThinkingLevel;
+  enabled?: boolean;
 };
 
-// File shape: { [configPath]: { [scope]: { [role]: string | { model?, thinking? } } } }
-// String values are legacy model-only entries; objects carry model and/or thinking.
+// File shape: { [configPath]: { [scope]: { [role]: string | { model?, thinking?, enabled? } } } }
+// String values are legacy model-only entries; objects carry model, thinking, and/or enabled.
 type ScopeMap = Record<string, unknown>;
 type OverrideFile = Record<string, Record<string, ScopeMap>>;
 
@@ -27,7 +28,7 @@ export function agentsModelOverridesPath(homeDir: string = os.homedir()): string
   return path.join(homeDir, ".config", "pi", AGENTS_MODEL_OVERRIDES_FILE_NAME);
 }
 
-/** Persist model/thinking choices per complete config, preset, and canonical role name. */
+/** Persist role choices per complete config, preset, and canonical role name. */
 export function projectAgentsModelOverridesPath(cwd: string = process.cwd()): string {
   return path.join(cwd, ".pi", AGENTS_MODEL_OVERRIDES_FILE_NAME);
 }
@@ -68,6 +69,12 @@ export function createAgentModelOverrideStore(
           if (override.thinking !== undefined) next.thinking = override.thinking;
         } else if (previous.thinking !== undefined) {
           next.thinking = previous.thinking;
+        }
+        if ("enabled" in override) {
+          // `false` is a meaningful persisted value; only undefined resets it.
+          if (override.enabled !== undefined) next.enabled = override.enabled;
+        } else if (previous.enabled !== undefined) {
+          next.enabled = previous.enabled;
         }
         if (Object.keys(next).length === 0) {
           delete data[key]?.[scope]?.[role];
@@ -111,11 +118,13 @@ export function validateAgentModelOverridesFile(file: string): void {
         const keys = Object.keys(record);
         const validModel = !("model" in record) || (typeof record.model === "string" && /^\S+\/\S+$/.test(record.model));
         const validThinking = !("thinking" in record) || (typeof record.thinking === "string" && (THINKING_LEVELS as readonly string[]).includes(record.thinking));
+        const validEnabled = !("enabled" in record) || typeof record.enabled === "boolean";
         if (
-          keys.some((key) => key !== "model" && key !== "thinking") ||
+          keys.some((key) => key !== "model" && key !== "thinking" && key !== "enabled") ||
           keys.length === 0 ||
           !validModel ||
           !validThinking ||
+          !validEnabled ||
           parseRoleOverride(entry) === undefined
         ) {
           throw new Error(`Invalid model override for ${configPath}/${scope}/${role}.`);
@@ -138,6 +147,7 @@ function parseRoleOverride(value: unknown): RoleOverride | undefined {
   if (typeof record.thinking === "string" && (THINKING_LEVELS as readonly string[]).includes(record.thinking)) {
     result.thinking = record.thinking as ThinkingLevel;
   }
+  if (typeof record.enabled === "boolean") result.enabled = record.enabled;
   return Object.keys(result).length > 0 ? result : undefined;
 }
 

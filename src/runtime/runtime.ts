@@ -233,14 +233,18 @@ export class SubagentRuntime {
     return this.activeModeValue;
   }
 
-  /** The roles the active preset activates, with overrides applied, minus session-disabled roles. */
+  /** Roles the active preset activates, with overrides applied, minus disabled roles. */
   get activeRoles(): readonly AgentRole[] {
     return this.effectiveRoles.filter((role) => !this.isRoleDisabled(role.name));
   }
 
-  /** Canonical names of the roles disabled for this session. */
+  /** Canonical names of roles currently disabled by session or persisted policy. */
   get disabledRoles(): ReadonlySet<string> {
-    return this.disabledRoleNames;
+    const disabled = new Set(this.disabledRoleNames);
+    for (const role of this.effectiveRoles) {
+      if (this.isPersistentlyDisabled(role.name)) disabled.add(role.name);
+    }
+    return disabled;
   }
 
   /**
@@ -249,8 +253,9 @@ export class SubagentRuntime {
    * and nested delegation to disabled roles — reject. Future child sessions
    * omit disabled roles from their delegation schemas. Names are canonicalized
    * case-insensitively; unknown names are remembered lowercase so a later
-   * preset switch cannot resurrect them. An empty iterable re-enables every
-   * role; disabling all configured roles is safe (every delegation rejects).
+   * preset switch cannot resurrect them. Persisted scope overrides are resolved
+   * separately by the role override callback. An empty iterable re-enables every
+   * manually disabled role; disabling all configured roles is safe (every delegation rejects).
    */
   setDisabledRoles(roles: Iterable<string>): void {
     this.disabledRoleNames.clear();
@@ -260,6 +265,12 @@ export class SubagentRuntime {
       const canonical = this.effectiveRoles.find((role) => role.name.toLowerCase() === trimmed.toLowerCase())?.name;
       this.disabledRoleNames.add(canonical ?? trimmed.toLowerCase());
     }
+    this.rejectDisabledFollowups();
+    this.refreshLiveDelegationTools();
+    this.notify();
+  }
+
+  private rejectDisabledFollowups(): void {
     for (const task of this.followupTasks.values()) {
       const agent = this.state.agents.get(task.agent);
       if (agent && this.isRoleDisabled(agent.role) && task.status === "accepted" && task.state !== "consumed") {
@@ -273,11 +284,9 @@ export class SubagentRuntime {
       queue.splice(0, queue.length, ...queue.filter((task) => task.status === "accepted"));
       if (queue.length === 0) this.followupQueues.delete(handle);
     }
-    this.refreshLiveDelegationTools();
-    this.notify();
   }
 
-  /** All roles in the active preset, including session-disabled roles for configuration UI. */
+  /** All roles in the active preset, including disabled roles for configuration UI. */
   get configuredRoles(): readonly AgentRole[] {
     return this.effectiveRoles;
   }
@@ -287,7 +296,11 @@ export class SubagentRuntime {
     for (const disabled of this.disabledRoleNames) {
       if (disabled.toLowerCase() === needle) return true;
     }
-    return false;
+    return this.isPersistentlyDisabled(name);
+  }
+
+  private isPersistentlyDisabled(name: string): boolean {
+    return this.options.roleOverride?.(this.activeModeValue, name)?.enabled === false;
   }
 
   /**
@@ -303,6 +316,7 @@ export class SubagentRuntime {
     if (canonical === this.activeModeValue) return canonical;
     this.activeModeValue = canonical;
     this.effectiveRoles = this.resolveRoles(canonical);
+    this.rejectDisabledFollowups();
     this.refreshLiveDelegationTools();
     this.notify();
     return canonical;
@@ -327,6 +341,7 @@ export class SubagentRuntime {
   /** Re-read persisted role overrides. Running invocations keep their existing sessions. */
   refreshRoles(): void {
     this.effectiveRoles = this.resolveRoles(this.activeModeValue);
+    this.rejectDisabledFollowups();
     this.refreshLiveDelegationTools();
     this.notify();
   }
@@ -1111,6 +1126,11 @@ export class SubagentRuntime {
     try {
       lease = await this.scheduler.acquire(controller.signal);
       controller.signal.throwIfAborted();
+      // A request can sit in the scheduler after it was initially validated.
+      // Re-check policy at execution time so newly disabled queued work never starts.
+      if (this.isRoleDisabled(resolved.role.name)) {
+        throw new Error(`Role ${resolved.role.name} is disabled in this session.`);
+      }
 
       const { loader, settings } = await createRoleResourceLoader(
         this.options.cwd,

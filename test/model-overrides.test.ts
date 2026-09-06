@@ -16,13 +16,13 @@ test("model and thinking overrides persist independently per config, preset, and
 
   store.set("/a/agents.yaml", "light", "Atlas", { model: "provider/fast", thinking: "high" });
   store.set("/a/agents.yaml", "deep", "Atlas", { model: "provider/deep" });
-  store.set("/a/agents.yaml", "light", "Vigil", { thinking: "max" });
+  store.set("/a/agents.yaml", "light", "Vigil", { thinking: "max", enabled: false });
   store.set("/b/agents.yaml", undefined, "Atlas", { model: "other/model" });
 
   const reopened = createAgentModelOverrideStore(home);
   assert.deepEqual(reopened.get("/a/agents.yaml", "light", "Atlas"), { model: "provider/fast", thinking: "high" });
   assert.deepEqual(reopened.get("/a/agents.yaml", "deep", "Atlas"), { model: "provider/deep" });
-  assert.deepEqual(reopened.get("/a/agents.yaml", "light", "Vigil"), { thinking: "max" });
+  assert.deepEqual(reopened.get("/a/agents.yaml", "light", "Vigil"), { thinking: "max", enabled: false });
   assert.deepEqual(reopened.get("/b/agents.yaml", undefined, "Atlas"), { model: "other/model" });
   assert.equal(reopened.get("/b/agents.yaml", "light", "Atlas"), undefined);
 
@@ -31,7 +31,9 @@ test("model and thinking overrides persist independently per config, preset, and
   assert.deepEqual(reopened.get("/a/agents.yaml", "light", "Atlas"), { thinking: "high" });
   store.set("/a/agents.yaml", "light", "Atlas", { thinking: undefined });
   assert.equal(reopened.get("/a/agents.yaml", "light", "Atlas"), undefined);
-  assert.deepEqual(reopened.get("/a/agents.yaml", "light", "Vigil"), { thinking: "max" });
+  assert.deepEqual(reopened.get("/a/agents.yaml", "light", "Vigil"), { thinking: "max", enabled: false });
+  store.set("/a/agents.yaml", "light", "Vigil", { enabled: true });
+  assert.deepEqual(reopened.get("/a/agents.yaml", "light", "Vigil"), { thinking: "max", enabled: true });
 
   // Removing a whole entry clears it without touching siblings.
   store.set("/a/agents.yaml", "light", "Vigil", undefined);
@@ -62,6 +64,17 @@ test("reload validation rejects mixed valid and invalid override fields", async 
   const file = agentsModelOverridesPath(home);
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, JSON.stringify({ "/a": { light: { Atlas: { model: "valid/model", thinking: "turbo" } } } }));
+  assert.throws(() => validateAgentModelOverridesFile(file), /Invalid model override/);
+});
+
+test("enabled overrides preserve false and validate supplied values", async () => {
+  const home = await mkdtemp(path.join(os.tmpdir(), "pi-agent-models-enabled-"));
+  const file = agentsModelOverridesPath(home);
+  const store = createAgentModelOverrideStore(home);
+  store.set("/a", "light", "Atlas", { enabled: false });
+  assert.deepEqual(store.get("/a", "light", "Atlas"), { enabled: false });
+
+  await writeFile(file, JSON.stringify({ "/a": { light: { Atlas: { enabled: "false" } } } }));
   assert.throws(() => validateAgentModelOverridesFile(file), /Invalid model override/);
 });
 
