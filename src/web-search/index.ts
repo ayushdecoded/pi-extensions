@@ -75,7 +75,7 @@ export function createWebSearchTool(options: CreateWebSearchToolOptions = {}) {
     promptSnippet: "Search the web using Parallel for current information",
     promptGuidelines: [
       "Use when current or external web information is needed.",
-      "Provide exactly 3 diverse keyword queries of 3-6 words, varying names, synonyms, or angles.",
+      "Provide 1-15 keyword queries of 3-6 words, varying names, synonyms, or angles. Default to 3; use more only for genuinely multi-angle topics.",
       "Make the objective self-contained and include the key entity or topic in every query.",
       "Do not write query sentences, instructions, or site: operators.",
       "Cite URLs from the returned results.",
@@ -90,10 +90,10 @@ export function createWebSearchTool(options: CreateWebSearchToolOptions = {}) {
       search_queries: Type.Array(
         Type.String({ minLength: 1, maxLength: 200 }),
         {
-          minItems: 3,
-          maxItems: 3,
+          minItems: 1,
+          maxItems: 15,
           description:
-            "Exactly 3 keyword search queries, each 3-6 words. Must be diverse: vary entity names, synonyms, and angles. Each query must include the key entity or topic. Never write sentences, instructions, or use site: operators.",
+            "1-15 keyword search queries, each 3-6 words. Default to 3 diverse queries: vary entity names, synonyms, and angles. Each query must include the key entity or topic. Never write sentences, instructions, or use site: operators.",
         },
       ),
     }),
@@ -116,8 +116,8 @@ export function createWebSearchTool(options: CreateWebSearchToolOptions = {}) {
       if (!objective) throw new Error("web_search requires a non-empty objective.");
 
       const queries = (params.search_queries ?? []).map((query) => query.trim()).filter(Boolean);
-      if (queries.length !== 3) {
-        throw new Error("web_search requires exactly 3 non-empty search_queries items.");
+      if (queries.length < 1 || queries.length > 15) {
+        throw new Error("web_search requires 1-15 non-empty search_queries items.");
       }
 
       const settings = settingsStore.load();

@@ -135,7 +135,7 @@ test("/web-search stores a pasted Parallel key securely", async () => {
   }
 });
 
-test("web search requires a non-empty objective and exactly three queries", async () => {
+test("web search requires a non-empty objective and 1-15 queries", async () => {
   const settingsStore: WebSearchSettingsStore = {
     load: () => ({ parallelApiKey: "test-key" }),
     save: () => {},
@@ -161,23 +161,23 @@ test("web search requires a non-empty objective and exactly three queries", asyn
     () =>
       tool.execute(
         "call-few",
-        { objective: "Find something", search_queries: ["one", "two"] },
+        { objective: "Find something", search_queries: [] },
         new AbortController().signal,
         undefined,
         ctx,
       ),
-    /exactly 3 non-empty search_queries/,
+    /1-15 non-empty search_queries/,
   );
   await assert.rejects(
     () =>
       tool.execute(
         "call-empty",
-        { objective: "Find something", search_queries: ["one", " ", "three"] },
+        { objective: "Find something", search_queries: [" ", " "] },
         new AbortController().signal,
         undefined,
         ctx,
       ),
-    /exactly 3 non-empty search_queries/,
+    /1-15 non-empty search_queries/,
   );
 });
 

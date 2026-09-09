@@ -1,4 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { Readable } from "node:stream";
 import { basename, extname, isAbsolute, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -290,6 +293,7 @@ async function pollVideo(
 ): Promise<{ status: string; video?: { url?: string } }> {
   const pollHeaders = directorHeaders(auth.apiKey, auth.headers);
   delete pollHeaders["Content-Type"];
+  let attempt = 0;
   for (;;) {
     signal.throwIfAborted();
     const response = await fetchImpl(`${XAI_VIDEOS_BASE_URL}/${encodeURIComponent(requestId)}`, {
@@ -305,7 +309,11 @@ async function pollVideo(
       throw new Error(`Director failed: xAI reported status "${status}".`);
     }
     if (/^done$/i.test(status)) return { status, video: body.video };
-    await delay(pollIntervalMs, signal);
+    // Long renders start at pollIntervalMs and back off to 15s so we stop
+    // hammering xAI while a clip is still rendering.
+    const backoff = Math.min(15_000, Math.round(pollIntervalMs * Math.pow(1.4, attempt)));
+    attempt += 1;
+    await delay(backoff, signal);
   }
 }
 
@@ -318,13 +326,25 @@ async function downloadVideo(
 ): Promise<string> {
   const response = await fetchImpl(url, { method: "GET", signal, headers: { "User-Agent": "Pi/director" } });
   if (!response.ok) throw new Error(`Director could not download the video: ${response.status} ${response.statusText}`);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  if (bytes.length === 0) throw new Error("Director downloaded an empty video file.");
   const directory = join(outputRoot, new Date().toISOString().slice(0, 10));
   await mkdir(directory, { recursive: true });
   const path = join(directory, `${safeName(toolCallId)}-${randomUUID().slice(0, 8)}.mp4`);
   const temporary = `${path}.tmp`;
-  await writeFile(temporary, bytes, { flag: "wx" });
+  if (response.body) {
+    // Stream to disk so a large MP4 never sits fully in memory.
+    await pipeline(Readable.fromWeb(response.body as import("node:stream/web").ReadableStream), createWriteStream(temporary, { flags: "wx" }));
+  } else {
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length === 0) throw new Error("Director downloaded an empty video file.");
+    await writeFile(temporary, bytes, { flag: "wx" });
+  }
+  const { stat } = await import("node:fs/promises");
+  const size = (await stat(temporary)).size;
+  if (size === 0) {
+    const { rm } = await import("node:fs/promises");
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw new Error("Director downloaded an empty video file.");
+  }
   await rename(temporary, path);
   return path;
 }

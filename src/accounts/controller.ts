@@ -44,6 +44,8 @@ export function createAccountController(rootPi: ExtensionAPI, options: { storePa
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let polling = false;
   let disposed = false;
+  let lastPollStarted = 0;
+  const MIN_IMMEDIATE_POLL_MS = 10_000;
   const lastPolled = new Map<string, number>();
   const baseProviders = new Map<SupportedProviderId, Provider<any>>();
 
@@ -235,12 +237,20 @@ export function createAccountController(rootPi: ExtensionAPI, options: { storePa
   function schedulePoll(delay: number): void {
     if (disposed || !rootAttachment) return;
     if (pollTimer) clearTimeout(pollTimer);
+    // message_end fires per assistant message; don't turn every turn into a
+    // quota round-trip. Coerce immediate requests inside the cooldown window
+    // to the remaining cooldown instead.
+    if (delay === 0) {
+      const elapsed = now() - lastPollStarted;
+      if (elapsed < MIN_IMMEDIATE_POLL_MS) delay = MIN_IMMEDIATE_POLL_MS - elapsed;
+    }
     pollTimer = setTimeout(() => void pollCodex(), Math.max(0, delay));
   }
 
   async function pollCodex(): Promise<void> {
     if (polling || disposed || !rootAttachment?.ctx) return;
     polling = true;
+    lastPollStarted = now();
     try {
       const ctx = rootAttachment.ctx;
       const accounts = coordinator.accounts("openai-codex");

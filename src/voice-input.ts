@@ -16,6 +16,8 @@ const ORIGINATOR = "Codex Desktop";
 const USER_AGENT = "Codex Desktop/26.429.30905 (Linux; x64)";
 const REQUEST_TIMEOUT_MS = 60_000;
 const PREVIEW_LENGTH = 120;
+/** ~2 minutes of 48kHz stereo s16 WAV; larger recordings reliably OOM the transcribe upload. */
+const MAX_AUDIO_BYTES = 25 * 1024 * 1024;
 const WIDGET_KEY = "voice-input";
 /** Shared shortcut identity for voice input and composer ask mode. */
 export const VOICE_INPUT_SHORTCUT = "ctrl+shift+r" as const;
@@ -57,6 +59,7 @@ export class VoiceIndicator implements Component {
   private readonly timer: NodeJS.Timeout;
   private readonly startedAt: number;
   private readonly history: number[] = [];
+  private lastBars = "";
   constructor(private readonly options: VoiceIndicatorOptions) {
     this.startedAt = options.startedAt ?? Date.now();
     this.timer = setInterval(() => void this.tick(), SAMPLE_INTERVAL_MS);
@@ -93,8 +96,15 @@ export class VoiceIndicator implements Component {
     if (this.history.length > HISTORY_SIZE) this.history.shift();
   }
   private async tick(): Promise<void> {
+    const before = this.history.length;
     await this.refresh();
-    this.options.tui.requestRender();
+    // Decorative waveform: skip full re-renders when the visible bars did not
+    // change (silence or steady level). Still renders at most 10Hz.
+    const bars = this.history.map((level) => bar(level)).join("");
+    if (bars !== this.lastBars || this.history.length !== before) {
+      this.lastBars = bars;
+      this.options.tui.requestRender();
+    }
   }
 }
 
@@ -181,7 +191,7 @@ export type VoiceInputDependencies = {
   codexProvider?: () => string;
 };
 
-export type VoiceToggleResult = "recording" | "transcribed" | "error";
+export type VoiceToggleResult = "recording" | "transcribed" | "cancelled" | "error";
 
 export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
   const fetchImpl = dependencies.fetch ?? fetch;
@@ -189,6 +199,31 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
   const recordDir = dependencies.recordDir ?? RECORD_DIR;
   const mediaPause = dependencies.mediaPause ?? mprisMediaPause();
   let active: { handle: RecorderHandle; filePath: string; pausedPlayers: string[] } | null = null;
+  let transcribeAbort: AbortController | null = null;
+
+  const isActive = (): boolean => active !== null || transcribeAbort !== null;
+
+  /** Cancel recording (discard) or in-flight transcription. Voice scope only; never touches the agent turn. */
+  async function cancel(ctx: ExtensionContext): Promise<boolean> {
+    if (transcribeAbort) {
+      transcribeAbort.abort(new Error("Voice input canceled."));
+      return true;
+    }
+    if (active) {
+      const current = active;
+      active = null;
+      try {
+        await recorder.stop(current.handle);
+        await mediaPause.resume(current.pausedPlayers);
+      } catch { /* Best-effort cleanup. */ }
+      if (ctx.mode === "tui") ctx.ui.setWidget(WIDGET_KEY, undefined);
+      await rm(current.filePath, { force: true }).catch(() => undefined);
+      await rm(join(recordDir, "pid"), { force: true }).catch(() => undefined);
+      ctx.ui.notify("Voice input canceled.", "warning");
+      return true;
+    }
+    return false;
+  }
 
   /** Toggle: start recording, or stop and transcribe into the prompt editor. */
   async function toggle(ctx: ExtensionContext): Promise<VoiceToggleResult> {
@@ -205,7 +240,23 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
         // matching Omarchy's native dictation: pause only while recording.
         await mediaPause.resume(current.pausedPlayers);
         const audio = await readFile(current.filePath);
-        const text = await transcribeAudio(audio, "audio/wav", ctx);
+        if (audio.byteLength > MAX_AUDIO_BYTES) {
+          ctx.ui.notify(`Voice recording is ${(audio.byteLength / 1024 / 1024).toFixed(1)}MB; limit is ${MAX_AUDIO_BYTES / 1024 / 1024}MB. Record a shorter clip.`, "error");
+          return "error";
+        }
+        transcribeAbort = new AbortController();
+        let text: string;
+        try {
+          text = await transcribeAudio(audio, "audio/wav", ctx, undefined, transcribeAbort.signal);
+        } catch (error) {
+          if ((error instanceof Error && error.message === "Voice input canceled.") || transcribeAbort.signal.aborted) {
+            ctx.ui.notify("Voice input canceled.", "warning");
+            return "cancelled";
+          }
+          throw error;
+        } finally {
+          transcribeAbort = null;
+        }
         if (text) {
           // Lands in the focused component's input when one registered a sink
           // (e.g. the ask panel); otherwise the prompt editor.
@@ -240,11 +291,13 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
   }
 
   /** Transcribe audio via the ChatGPT backend endpoint using the Codex login. */
-  async function transcribeAudio(audio: Uint8Array, mimeType: string, ctx: ExtensionContext, language?: string): Promise<string> {
+  async function transcribeAudio(audio: Uint8Array, mimeType: string, ctx: ExtensionContext, language?: string, cancelSignal?: AbortSignal): Promise<string> {
     const auth = await codexAuth(ctx, "Voice input", dependencies.codexProvider?.());
     const form = new FormData();
     form.append("file", new Blob([new Uint8Array(audio)], { type: mimeType }), "recording.wav");
     if (language) form.append("language", language);
+    const signals: AbortSignal[] = [AbortSignal.timeout(REQUEST_TIMEOUT_MS)];
+    if (cancelSignal) signals.push(cancelSignal);
     const response = await fetchImpl(TRANSCRIBE_URL, {
       method: "POST",
       headers: {
@@ -253,7 +306,7 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
         "User-Agent": USER_AGENT,
       },
       body: form,
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: signals.length === 1 ? signals[0] : AbortSignal.any(signals),
     });
     if (!response.ok) throw new Error(await responseError(response));
     const payload = await response.json() as { text?: string };
@@ -262,7 +315,7 @@ export function createVoiceInput(dependencies: VoiceInputDependencies = {}) {
     return text;
   }
 
-  return { toggle, transcribeAudio };
+  return { toggle, transcribeAudio, cancel, isActive };
 }
 
 export function registerVoiceInput(pi: ExtensionAPI, dependencies: VoiceInputDependencies = {}): { toggle: (ctx: ExtensionContext) => Promise<VoiceToggleResult> } {
@@ -272,9 +325,26 @@ export function registerVoiceInput(pi: ExtensionAPI, dependencies: VoiceInputDep
     description: "Toggle voice input (record, then transcribe into the prompt)",
     handler: toggle,
   });
+  // Voice-scope esc: cancels recording/transcription when voice is active.
+  // This cannot suppress Pi core's global esc-to-cancel-agent-turn; it only
+  // cleans up voice state so a single esc during voice doesn't leave a stale
+  // recorder behind. Global double-esc behavior stays with Pi core.
+  pi.registerShortcut("escape", {
+    description: "Cancel voice recording/transcription when active",
+    handler: (ctx) => {
+      if (voice.isActive()) void voice.cancel(ctx);
+    },
+  });
   pi.registerCommand("voice", {
-    description: "Toggle voice input recording/transcription",
-    handler: async (_args, ctx) => { await voice.toggle(ctx); },
+    description: "Toggle voice input recording/transcription (voice cancel discards)",
+    handler: async (args, ctx) => {
+      if (args.trim().toLowerCase() === "cancel") {
+        const cancelled = await voice.cancel(ctx);
+        if (!cancelled) ctx.ui.notify("No voice recording in progress.", "warning");
+        return;
+      }
+      await voice.toggle(ctx);
+    },
   });
   return voice;
 }

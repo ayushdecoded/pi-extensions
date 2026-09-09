@@ -71,6 +71,7 @@ import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
 import { createPainterTool } from "./painter.ts";
+import { createPainterModelStore, isPainterModelId, PAINTER_MODELS, projectPainterModelsPath, type PainterModelId } from "./painter/models.ts";
 import { createDirectorTool } from "./director.ts";
 import { createAccountController, type AccountController } from "./accounts/controller.ts";
 import { registerAccountCommands } from "./accounts/commands.ts";
@@ -271,7 +272,71 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerPromptDuration(pi);
   registerProactiveCompaction(pi);
   registerWebSearch(pi);
-  pi.registerTool(createPainterTool({ codexProvider: () => accounts.selectedProviderId("openai-codex") }));
+  // Painter image model: session override wins, then project file, then the
+  // global file (mirrors the agents role-override scopes, minus the TUI).
+  let painterStore = createPainterModelStore();
+  let painterSessionModel: PainterModelId | undefined;
+  const painterDefaultModel = (): PainterModelId =>
+    painterSessionModel ?? painterStore.getDefault();
+  const registerPainterTool = (): void => {
+    pi.registerTool(createPainterTool({
+      codexProvider: () => accounts.selectedProviderId("openai-codex"),
+      defaultModel: painterDefaultModel,
+    }));
+  };
+  registerPainterTool();
+  pi.registerCommand("painter", {
+    description: "Choose the painter image model (session, project, or global)",
+    getArgumentCompletions: (prefix) => {
+      const normalized = prefix.trim().toLowerCase();
+      const options = [
+        ...PAINTER_MODELS.map((model) => ({
+          value: model.id,
+          label: model.id,
+          description: `${model.label} · ${model.description}`,
+        })),
+        { value: "session", label: "session", description: "Pick a model for this session only" },
+        { value: "project", label: "project", description: "Pick a model saved to .pi/painter.json" },
+        { value: "global", label: "global", description: "Pick a model saved to ~/.config/pi/painter.json" },
+      ];
+      const matches = options.filter((option) => option.value.startsWith(normalized));
+      return matches.length ? matches : null;
+    },
+    handler: async (args, ctx) => {
+      const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      let scope: "session" | "project" | "global" | undefined;
+      let model: string | undefined;
+      for (const token of tokens) {
+        if (token === "session" || token === "project" || token === "global") scope ??= token;
+        else if (isPainterModelId(token)) model ??= token;
+        else {
+          ctx.ui.notify(`Usage: /painter [session|project|global] [${PAINTER_MODELS.map((item) => item.id).join("|")}]`, "warning");
+          return;
+        }
+      }
+      if (!scope && ctx.hasUI) {
+        const selected = await ctx.ui.select("Painter model scope", ["session", "project", "global"]);
+        if (!selected) return;
+        scope = selected as "session" | "project" | "global";
+      }
+      scope ??= "session";
+      if (!model && ctx.hasUI) {
+        const selected = await ctx.ui.select(
+          `Painter model (${scope})`,
+          PAINTER_MODELS.map((item) => item.id),
+        );
+        if (!selected) return;
+        model = selected;
+      }
+      if (!model || !isPainterModelId(model)) {
+        ctx.ui.notify(`Usage: /painter [session|project|global] [${PAINTER_MODELS.map((item) => item.id).join("|")}]`, "warning");
+        return;
+      }
+      if (scope === "session") painterSessionModel = model;
+      else painterStore.set(scope, model);
+      ctx.ui.notify(`Painter model (${scope}): ${model}`, "info");
+    },
+  });
   pi.registerTool(createDirectorTool());
   // Dictation rides the same voice pipeline: while the ask dialog owns focus,
   // its hotkey triggers a toggle and transcripts land in the focused input.
@@ -524,6 +589,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
 
     currentConfig = config;
     backgroundRuns = getBackgroundRuns(ctx.sessionManager.getSessionId(), ctx.sessionManager.getEntries());
+    painterStore = createPainterModelStore({ projectPath: projectPainterModelsPath(ctx.cwd) });
+    painterSessionModel = undefined;
     const activeMode = resolveActiveMode(config, activeModeStore.load(config.path));
 
     if (ctx.mode === "tui") {

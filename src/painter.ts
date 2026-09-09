@@ -7,6 +7,7 @@ import type { ProviderHeaders } from "@earendil-works/pi-ai";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { codexAuth as resolveCodexAuth, codexAuthHeaders } from "./codex-auth.ts";
+import { isPainterModelId, PAINTER_MODELS, painterModelSlug, type PainterModelId } from "./painter/models.ts";
 
 const CODEX_IMAGES_URL = "https://chatgpt.com/backend-api/codex/images";
 const MAX_REFERENCES = 5;
@@ -25,8 +26,9 @@ type PainterParams = {
   prompt: string;
   reference_images?: string[];
   count?: 1 | 2 | 3 | 4;
-  quality?: "low" | "medium" | "high" | "auto";
+  quality?: "low" | "medium" | "high" | "xhigh" | "max" | "auto";
   mode?: "ui" | "general";
+  model?: PainterModelId;
 };
 
 type PainterDetails = {
@@ -34,13 +36,18 @@ type PainterDetails = {
   paths: string[];
   quality: NonNullable<PainterParams["quality"]>;
   references: string[];
+  model: PainterModelId;
 };
 
 type PainterDependencies = {
   fetch?: typeof fetch;
   outputRoot?: string;
   codexProvider?: () => string;
+  /** Resolved default when the call omits `model` (session → project → global). */
+  defaultModel?: () => PainterModelId;
 };
+
+export { PAINTER_MODELS, type PainterModelId };
 
 /** Creates images with the active ChatGPT/Codex OAuth subscription. */
 export function createPainterTool(dependencies: PainterDependencies = {}) {
@@ -56,6 +63,7 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
       "Use for raster assets and UI mockups, not SVG, HTML, or CSS.",
       "For UI edits, pass the current screenshot first and name the change.",
       "Use count for variants; reuse an output path for follow-up edits.",
+      "Flare is the default model; pass model sunburst for precision work.",
     ],
     parameters: Type.Object({
       prompt: Type.String({ minLength: 1, description: "What to create or change. Quote required text exactly." }),
@@ -67,8 +75,11 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
       count: Type.Optional(Type.Union([Type.Literal(1), Type.Literal(2), Type.Literal(3), Type.Literal(4)], {
         description: "Image variants to create. Default: 1.",
       })),
-      quality: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("auto")], {
+      quality: Type.Optional(Type.Union([Type.Literal("low"), Type.Literal("medium"), Type.Literal("high"), Type.Literal("xhigh"), Type.Literal("max"), Type.Literal("auto")], {
         description: "Output quality. Default: auto.",
+      })),
+      model: Type.Optional(Type.Union(PAINTER_MODELS.map((model) => Type.Literal(model.id)), {
+        description: `Image model. Default: configured painter model (${PAINTER_MODELS.map((model) => `${model.id}: ${model.description}`).join(" ")})`,
       })),
       mode: Type.Optional(Type.Union([Type.Literal("ui"), Type.Literal("general")], {
         description: "ui preserves a referenced product design. Default: ui.",
@@ -88,6 +99,10 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
     async execute(toolCallId: string, params: PainterParams, signal: AbortSignal | undefined, _onUpdate: unknown, ctx: ExtensionContext) {
       const quality = params.quality ?? "auto";
       const mode = params.mode ?? "ui";
+      const model: PainterModelId = params.model !== undefined && isPainterModelId(params.model)
+        ? params.model
+        : (dependencies.defaultModel?.() ?? "flare");
+      const modelSlug = painterModelSlug(model);
       const references = await loadReferences(params.reference_images ?? [], ctx.cwd);
       const operation = references.length ? "edit" : "generate";
       const auth = await resolveCodexAuth(ctx, "Painter", dependencies.codexProvider?.());
@@ -98,7 +113,7 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
           signal: requestSignal.signal,
           headers: codexHeaders(auth.apiKey, auth.headers, toolCallId),
           body: JSON.stringify({
-            model: "gpt-image-2",
+            model: modelSlug,
             prompt: buildPrompt(params.prompt, mode, references.length),
             ...(references.length ? { images: references.map((reference) => ({ image_url: reference.dataUrl })) } : {}),
             n: params.count ?? 1,
@@ -114,10 +129,9 @@ export function createPainterTool(dependencies: PainterDependencies = {}) {
         const paths = await saveImages(data, outputRoot, toolCallId);
         return {
           content: [
-            { type: "text", text: `Created ${paths.length} image${paths.length === 1 ? "" : "s"} (${operation}, ${quality}).\n${paths.join("\n")}` },
-            ...data.map((image) => ({ type: "image" as const, data: image, mimeType: "image/png" })),
+            { type: "text", text: `Created ${paths.length} image${paths.length === 1 ? "" : "s"} (${operation}, ${quality}, ${model}).\n${paths.join("\n")}\nRead a path with the read tool to view it; reuse an output path for follow-up edits.` },
           ],
-          details: { operation, paths, quality, references: references.map((reference) => reference.path) } satisfies PainterDetails,
+          details: { operation, paths, quality, references: references.map((reference) => reference.path), model } satisfies PainterDetails,
         };
       } finally {
         requestSignal.dispose();

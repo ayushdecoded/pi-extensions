@@ -19,6 +19,7 @@ export function createFooterController(
   let invalidateAccounting: (() => void) | undefined;
   let disposeRuntime: (() => void) | undefined;
   let codexWeeklyRemaining: number | undefined;
+  let renderTimer: ReturnType<typeof setTimeout> | undefined;
 
   return {
     install(ctx, runtime) {
@@ -84,15 +85,21 @@ export function createFooterController(
     },
     setCodexWeeklyRemaining(remaining) {
       codexWeeklyRemaining = remaining;
-      render?.();
+      this.requestRender();
     },
     requestRender(accountingChanged = false) {
       if (accountingChanged) invalidateAccounting?.();
-      render?.();
+      if (renderTimer) return;
+      renderTimer = setTimeout(() => {
+        renderTimer = undefined;
+        render?.();
+      }, 50);
     },
     dispose() {
       disposeRuntime?.();
       disposeRuntime = undefined;
+      if (renderTimer) clearTimeout(renderTimer);
+      renderTimer = undefined;
       render = undefined;
       invalidateAccounting = undefined;
     },

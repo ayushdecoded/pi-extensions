@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { buildPrompt, codexHeaders, createPainterTool, loadReferences } from "../src/painter.ts";
+import { createPainterModelStore } from "../src/painter/models.ts";
 
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL10wAAAABJRU5ErkJggg==", "base64");
 
@@ -56,14 +57,48 @@ test("Painter sends a Codex OAuth image-edit request and saves every result", as
   assert.equal(request?.headers.get("ChatGPT-Account-ID"), "account-1");
   assert.equal(request?.headers.get("x-codex-image-turn-id"), "call:1");
   const body = await request?.json() as any;
-  assert.equal(body.model, "gpt-image-2");
+  assert.equal(body.model, "gpt-image-2.5-flare");
   assert.equal(body.n, 2);
   assert.equal(body.quality, "high");
   assert.equal(body.images.length, 1);
   assert.match(body.prompt, /Preserve its application shell/);
   assert.equal(result.details.paths.length, 2);
   assert.deepEqual(await readFile(result.details.paths[0]), png);
-  assert.equal(result.content.filter((part: any) => part.type === "image").length, 2);
+  assert.equal(result.content.filter((part: any) => part.type === "image").length, 0);
+  assert.match(result.content[0].text, /Read a path with the read tool/);
+  assert.equal(result.details.model, "flare");
+});
+
+test("Painter uses the per-call model and the configured default", async () => {
+  const root = await mkdtemp(join(tmpdir(), "painter-"));
+  const seen: string[] = [];
+  const tool = createPainterTool({
+    outputRoot: join(root, "out"),
+    defaultModel: () => "sunburst",
+    fetch: (async (input: any, init: any) => {
+      seen.push(((await new Request(input, init).json()) as any).model);
+      return new Response(JSON.stringify({ data: [{ b64_json: png.toString("base64") }] }), { status: 200 });
+    }) as any,
+  }) as any;
+
+  const fromDefault = await tool.execute("call:1", { prompt: "A mockup" }, undefined, undefined, context());
+  assert.equal(fromDefault.details.model, "sunburst");
+  const explicit = await tool.execute("call:2", { prompt: "A mockup", model: "gpt-image-2" }, undefined, undefined, context());
+  assert.equal(explicit.details.model, "gpt-image-2");
+  assert.deepEqual(seen, ["gpt-image-2.5-sunburst", "gpt-image-2"]);
+});
+
+test("Painter model store prefers project over global and falls back to flare", async () => {
+  const root = await mkdtemp(join(tmpdir(), "painter-models-"));
+  const store = createPainterModelStore({
+    globalPath: join(root, "global.json"),
+    projectPath: join(root, "project.json"),
+  });
+  assert.equal(store.getDefault(), "flare");
+  store.set("global", "sunburst");
+  assert.equal(store.getDefault(), "sunburst");
+  store.set("project", "gpt-image-2");
+  assert.equal(store.getDefault(), "gpt-image-2");
 });
 
 test("Painter generates without references and reports useful API errors", async () => {
