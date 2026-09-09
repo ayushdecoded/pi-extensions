@@ -19,7 +19,9 @@ export type BackgroundRunResultDetails = {
 type SendMessage = ExtensionAPI["sendMessage"];
 
 /**
- * Deliver one hidden follow-up after a detached run settles. A stale session API
+ * Deliver one hidden steering message after a detached run settles. Steering
+ * makes the result available before the model's next decision instead of
+ * waiting until the current agent loop finishes. A stale session API
  * (after reload or session replacement) throws and is swallowed: the process was
  * intentionally left running, so there is nothing to clean up.
  */
@@ -36,7 +38,7 @@ export function deliverBackgroundRunResult(result: BackgroundRunSettledResult, s
   try {
     sendMessage(
       { customType: BACKGROUND_RUN_RESULT_TYPE, content: formatBackgroundRunResult(result), display: true, details },
-      { triggerTurn: true, deliverAs: "followUp" },
+      { triggerTurn: true, deliverAs: "steer" },
     );
   } catch {
     // Session replacement or reload invalidated this extension's API.

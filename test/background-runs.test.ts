@@ -270,7 +270,7 @@ test("the bash tool still delegates foreground calls to the built-in backend", a
   assert.equal(registry.activeCount(), 0, "foreground calls never create background runs");
 });
 
-test("settled background runs deliver a follow-up message and render as a transcript card", () => {
+test("settled background runs deliver a steering message and render as a transcript card", () => {
   const sent: Array<{ message: any; options: any }> = [];
   const result: BackgroundRunSettledResult = {
     runId: "r_1234abcd",
@@ -287,7 +287,7 @@ test("settled background runs deliver a follow-up message and render as a transc
   assert.equal(sent[0]!.message.display, true);
   assert.match(sent[0]!.message.content, /r_1234abcd · exited 1 · 3s/);
   assert.match(sent[0]!.message.content, /npm run build/);
-  assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "followUp" });
+  assert.deepEqual(sent[0]!.options, { triggerTurn: true, deliverAs: "steer" });
 });
 
 test("stale session APIs do not reject background delivery", () => {

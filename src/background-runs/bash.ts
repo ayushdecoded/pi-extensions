@@ -92,7 +92,7 @@ export function createBackgroundBashTool(options: BackgroundBashToolOptions): To
     label: "bash",
     description:
       "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 200 lines or 50KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds. " +
-      "Pass background: true to launch the command detached and continue working; a follow-up message with the tail output is delivered when it settles, and the receipt includes the run id. " +
+      "Pass background: true to launch the command detached and continue working; a steering message with the tail output is delivered when it settles, and the receipt includes the run id. " +
       "Manage a background run with background: {action: \"status\" | \"logs\" | \"kill\", runId}. status reports state and elapsed time, logs returns the tail of the run output, kill terminates the process tree.",
     promptSnippet: builtin.promptSnippet,
     promptGuidelines: builtin.promptGuidelines,
