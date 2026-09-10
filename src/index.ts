@@ -70,6 +70,8 @@ import { createEmojiAutocompleteProvider } from "./ui/emoji-autocomplete.ts";
 import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
+import { registerServerCompaction } from "./compaction/server-compaction.ts";
+import { registerContextMemory } from "./context-memory/index.ts";
 import { createPainterTool } from "./painter.ts";
 import { createPainterModelStore, isPainterModelId, PAINTER_MODELS, projectPainterModelsPath, type PainterModelId } from "./painter/models.ts";
 import { createDirectorTool } from "./director.ts";
@@ -271,6 +273,8 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerBreakdownCommand(pi);
   registerPromptDuration(pi);
   registerProactiveCompaction(pi);
+  registerContextMemory(pi);
+  registerServerCompaction(pi);
   registerWebSearch(pi);
   // Painter image model: session override wins, then project file, then the
   // global file (mirrors the agents role-override scopes, minus the TUI).
@@ -303,6 +307,10 @@ export default function subagentExtension(pi: ExtensionAPI): void {
       return matches.length ? matches : null;
     },
     handler: async (args, ctx) => {
+      const current = painterSessionModel !== undefined
+        ? { model: painterSessionModel, source: "session" as const }
+        : painterStore.describe();
+      ctx.ui.notify(`Painter model: ${current.model} (${current.source})`, "info");
       const tokens = args.trim().toLowerCase().split(/\s+/).filter(Boolean);
       let scope: "session" | "project" | "global" | undefined;
       let model: string | undefined;

@@ -44,9 +44,9 @@ test("suspending a parent lease lets nested work use the same slot", async () =>
 });
 
 test("runtime injects the subagent tool only for delegating roles below max depth", () => {
-  assert.deepEqual(toolsForRole({ tools: ["read"], delegates: [] }, 1, 2), ["read"]);
-  assert.deepEqual(toolsForRole({ tools: ["read", "write"], delegates: ["Atlas"] }, 1, 2), ["read", "write", "subagent"]);
-  assert.deepEqual(toolsForRole({ tools: ["read", "write"], delegates: ["Atlas"] }, 2, 2), ["read", "write"]);
+  assert.deepEqual(toolsForRole({ tools: ["read"], delegates: [] }, 1, 2), ["read", "context_memory"]);
+  assert.deepEqual(toolsForRole({ tools: ["read", "write"], delegates: ["Atlas"] }, 1, 2), ["read", "write", "context_memory", "subagent"]);
+  assert.deepEqual(toolsForRole({ tools: ["read", "write"], delegates: ["Atlas"] }, 2, 2), ["read", "write", "context_memory"]);
 });
 
 test("switching the active preset re-resolves roles and notifies subscribers", () => {

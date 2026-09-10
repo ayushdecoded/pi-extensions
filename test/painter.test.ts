@@ -95,10 +95,13 @@ test("Painter model store prefers project over global and falls back to flare", 
     projectPath: join(root, "project.json"),
   });
   assert.equal(store.getDefault(), "flare");
+  assert.deepEqual(store.describe(), { model: "flare", source: "default" });
   store.set("global", "sunburst");
   assert.equal(store.getDefault(), "sunburst");
+  assert.deepEqual(store.describe(), { model: "sunburst", source: "global" });
   store.set("project", "gpt-image-2");
   assert.equal(store.getDefault(), "gpt-image-2");
+  assert.deepEqual(store.describe(), { model: "gpt-image-2", source: "project" });
 });
 
 test("Painter generates without references and reports useful API errors", async () => {

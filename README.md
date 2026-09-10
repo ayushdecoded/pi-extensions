@@ -1,6 +1,6 @@
 # My Pi Setup
 
-A self-contained Pi package with a main-agent identity, persistent native subagents, role prompts, `/handoff`, `/create-skill`, web search, and integrated accounting/UI. It uses Pi's in-process SDK and native session statistics throughout.
+A self-contained Pi package with a main-agent identity, persistent native subagents, role prompts, `/handoff`, `/create-skill`, web search, and integrated accounting/UI. It uses Pi's in-process SDK, native session statistics, and durable accounting for lazy fallback work.
 
 ## Runtime
 
@@ -145,11 +145,43 @@ subagent({ action: "cancel", target: { agent: "vigil-1" } }); // leaves the rest
 subagent({ action: "cancel", target: { all: true } });
 ```
 
-Inspection is read-only and bounded: it reports only current status, short task previews, elapsed time, selected tool activity, visible progress text, and measurable pending steering/queue IDs with short previews. It never dumps arguments, tool output, transcripts, or private reasoning; it does not interrupt work, steer a child, trigger a turn, or consume completion delivery. Nested children may inspect/cancel only their own spawned children. There is no queued-task target or provider observability action.
+Inspection is read-only and bounded: it reports only current status, short task previews, elapsed minutes (for example `2.4m`, frozen when work finishes), selected tool activity with bounded command/path details, the latest available assistant text labeled `last_message` (not a generated progress report), and measurable pending steering/queue IDs with short previews. Empty fields are omitted. It never dumps full argument objects, tool output, transcripts, or private reasoning; it does not interrupt work, steer a child, trigger a turn, or consume completion delivery. Nested children may inspect/cancel only their own spawned children. There is no queued-task target or provider observability action.
 
 An unknown or already-settled id (or a handle that is no longer live) returns a `not found` notice instead of an error. `Ctrl+B` promotes all currently blocking root batches without interrupting their child work; each promoted batch returns a receipt to the blocking tool and one aggregate completion is delivered automatically. If the host editor already uses `Ctrl+B`, remove or override that host mapping explicitly; the pack never edits global keybindings silently.
 
 Detached batches survive `/reload`: the reload keeps the process alive and re-invokes this extension, so the runtime hands its running child sessions off to the reloaded instance instead of aborting them. The agents keep working, their state stays visible in `/agents`, and the aggregated result is still delivered as a follow-up through the live session API. Branch navigation (e.g. `/back`, `/fork` moves within the session tree) or switching to another session still aborts running agents; the host session-shutdown warning reports that active work will stop when the shutdown cannot be vetoed.
+
+## Codex server-side compaction
+
+OpenAI Codex (`openai-codex-responses`) uses the Codex server checkpoint API first for manual, automatic-threshold, and overflow compaction in both the main session and native child sessions. Other providers keep Pi's native compaction unchanged. A successful checkpoint stores the encrypted artifact and references the original append-only history; replay sends the recent Pi suffix plus bounded older user context and the opaque artifact.
+
+Fallback is lazy, never eager: a remote failure uses normal Pi/native compaction, while a model, provider, base URL, or Codex-account incompatibility materializes a portable native summary only when that checkpoint is needed. The summary is cached durably, so the first incompatible turn pays the extra latency/tokens and later turns reuse it. Compatibility is deliberately conservative (model and account identity must match), and a failed fallback leaves the raw archive intact.
+
+Checkpoints and lazy summaries survive reload and branch navigation. Until a lazy summary is materialized, UI/export surfaces can show only the opaque checkpoint marker; the original raw archive is retained. Pi's native `getSessionStats()` cannot count custom lazy-summary entries, but this pack's totals and child invocation accounting include them. `/handoff` and branch-summary are separate Pi-native flows, not server compaction. After `/reload`, already-live children keep their old extension code; the new code applies to the next session instance.
+
+## Local context memory
+
+Main and native child sessions have one `context_memory` tool:
+
+```ts
+context_memory({ action: "search", query: "received 401" }); // literal, case-insensitive, newest first
+context_memory({ action: "list" }); // newest readable active-branch entries
+context_memory({ action: "list", before: "returned-nextBefore" }); // next list page
+context_memory({ action: "read", ref: "returned-history-ref" });
+context_memory({ action: "read", ref: "notes" });
+context_memory({ action: "edit", ref: "notes", edits: [{ oldText: "", newText: "Next: inspect cookies." }] });
+context_memory({ action: "edit", ref: "notes", edits: [{ oldText: "cookies", newText: "refresh" }] });
+```
+
+Terminal output uses compact action headers, readable result excerpts, and bounded note/read previews; expanding a tool result reveals the full returned page and metadata. The model still receives the structured result unchanged.
+
+Search covers persisted conversation text, tool calls/results, and background completion reports across all branches in the current session, including history before compaction. Shared ancestors appear only once; search and history reads mark off-branch evidence with `offBranch`, since it may reflect discarded decisions. No tree-navigation API is exposed. It excludes reasoning, images, internal bookkeeping, and memory-tool calls/results. Search results include history `ref` values, bounded excerpts, a `readOffset` start position (pass it as `offset` to `read`), and a `nextBefore` cursor (pass as `before`). `list` returns up to 8 readable active-branch entries newest first, with bounded 400-character start previews and the same `nextBefore` pagination cursor. Reads return up to 8,000 characters with `nextOffset` (pass as `offset`) and ancestry-based `previousRef`/`nextRef` values, never unrelated neighboring log records. `nextRef` is null when continuation would require choosing between branches. Only archived text is recoverable; truncated or unrecorded output is not restored.
+
+Each session owns one branch-aware working note (maximum 6,000 characters), addressed as `ref: "notes"` through `read` and `edit`. An edit batch contains 1–32 exact `oldText`/`newText` replacements, all matched against the original note. Nonempty matches must be unique and non-overlapping; a missing, ambiguous, overlapping, or oversized batch fails without saving anything. Empty `oldText` appends verbatim (supply your own newlines); empty `newText` deletes. Appends are concatenated in request order after replacements. The size limit applies to the final note. Successful edits return only confirmation and character count. History is immutable. The former `notes`/`save_notes` actions are replaced, but existing saved note revisions remain readable. Revisions are custom entries in the existing session log, so reload and branch navigation restore the applicable version. Saving requires an existing persisted session. Children receive this utility automatically, independently of their configured workspace tools; they cannot use it to read another session. Child follow-ups reopen their own notes, and parent/child findings still travel through normal completion reports.
+
+Existing compaction and its scheduling are unchanged. After a compaction boundary, the note revision at that boundary is explicitly included alongside the summary/checkpoint. This snapshot is reconstructed from the archive and stays stable within that context window, even if newer notes are saved; `read` with `ref: "notes"` reads the latest active-branch revision. Notes are ordinary inspectable tool output, not hidden reasoning. No automatic note-generation calls, embeddings, separate database, TTL timers, or cache keepalives are added. Tool usage is included in normal session accounting; lower overall cost is not guaranteed.
+
+Run `/reload` or restart to activate the tool. Already-running children retain their loaded extension code until their next session instance.
 
 ## Session transfer and prompt commands
 

@@ -1,5 +1,7 @@
 import type { ExtensionAPI, ExtensionContext, TurnEndEvent } from "@earendil-works/pi-coding-agent";
 
+import { logCompactionDiagnostic } from "./compaction/diagnostics.ts";
+
 export const COMPACTION_PERCENT = 85;
 export const PROACTIVE_COMPACTION_CONTINUATION_TYPE = "proactive-compaction-continuation";
 const CONTINUATION_INSTRUCTION = "Continue the active task from the compacted context. Do not stop merely because compaction occurred; complete the work that was in progress.";
@@ -23,7 +25,10 @@ export function registerProactiveCompaction(pi: ExtensionAPI): void {
           { triggerTurn: true, deliverAs: "followUp" },
         );
       },
-      onError: () => { compacting = false; },
+      onError: (error) => {
+        compacting = false;
+        logCompactionDiagnostic(pi, ctx, "proactive", error);
+      },
     });
   });
 

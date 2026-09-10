@@ -51,6 +51,8 @@ export type PainterModelScope = "global" | "project";
 export type PainterModelStore = {
   /** Project file wins over the global file; falls back to the default. */
   getDefault(): PainterModelId;
+  /** Same resolution as getDefault, plus where the value came from. */
+  describe(): { model: PainterModelId; source: "project" | "global" | "default" };
   set(scope: PainterModelScope, id: PainterModelId): void;
 };
 
@@ -100,6 +102,12 @@ export function createPainterModelStore(options: { globalPath?: string; projectP
     getDefault() {
       if (!fresh()) load();
       return projectCached ?? globalCached ?? DEFAULT_PAINTER_MODEL;
+    },
+    describe() {
+      if (!fresh()) load();
+      if (projectCached !== undefined) return { model: projectCached, source: "project" };
+      if (globalCached !== undefined) return { model: globalCached, source: "global" };
+      return { model: DEFAULT_PAINTER_MODEL, source: "default" };
     },
     set(scope, id) {
       const file = scope === "project" ? projectPath : globalPath;

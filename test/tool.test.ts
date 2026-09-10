@@ -280,3 +280,26 @@ test("tool guidance defines bounded empty-slate delegation", () => {
   assert.match(schema, /Context, objective, result, and stop condition/);
   assert.match(schema, /New context, objective, result, and stop condition/);
 });
+
+test("inspection formats minutes, activity details and last-message excerpts without empty fields", async () => {
+  const tool = createSubagentTool(config, async () => ({ batchId: "unused", runs: [], allRuns: [], durationMs: 0 }), {
+    controlAction: (request) => ({
+      action: "inspect", target: request.target, truncated: false,
+      agents: [
+        { agent: "scout-1", role: "Scout", status: "running", elapsedMs: 144_000,
+          taskPreview: "Investigate refresh", activity: { tool: "bash", detail: 'rg -n "refresh" src/' },
+          lastMessage: "Found two paths", pendingSteering: [], pendingQueue: [{ id: "q1", preview: "Check expiry too" }] },
+        { agent: "scout-2", role: "Scout", status: "idle", pendingSteering: [], pendingQueue: [] },
+      ],
+      batches: [{ batch: "batch-1", status: "running", elapsedMs: 150_000, liveAgents: 1, totalAgents: 2 }],
+    }),
+  });
+  const result = await tool.execute("inspect", { action: "inspect", target: { all: true } }, undefined, undefined, {} as Parameters<typeof tool.execute>[4]);
+  const text = result.content.filter((part) => part.type === "text").map((part) => part.text).join("\n");
+  assert.match(text, /scout-1 · Scout · running · elapsed=2\.4m/);
+  assert.match(text, /activity: bash · rg -n "refresh" src\//);
+  assert.match(text, /last_message: Found two paths/);
+  assert.match(text, /pending: queue q1: Check expiry too/);
+  assert.match(text, /scout-2 · Scout · idle\nbatch-1/);
+  assert.match(text, /batch-1 · running · elapsed=2\.5m · 1\/2 live/);
+});

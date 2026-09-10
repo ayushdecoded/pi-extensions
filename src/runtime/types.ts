@@ -187,7 +187,7 @@ export type AgentInspection = {
   taskPreview?: string;
   elapsedMs?: number;
   activity?: { tool?: string; detail?: string };
-  progress?: string;
+  lastMessage?: string;
   pendingSteering: InspectionPendingItem[];
   pendingQueue: InspectionPendingItem[];
 };

@@ -16,7 +16,7 @@ import { defaultModeName } from "../config/mode.ts";
 import { createSubagentTool } from "../tool.ts";
 import { createWebSearchTool } from "../web-search/index.ts";
 import { CapacityLease, CapacityScheduler } from "./scheduler.ts";
-import { advanceStateRevision, applyEvent, emptyRuntimeState, sessionEntriesUsage, usageDelta } from "./state.ts";
+import { advanceStateRevision, applyEvent, emptyRuntimeState, fallbackEntriesUsage, sessionEntriesUsage, usageDelta } from "./state.ts";
 import { createRoleResourceLoader } from "./resources.ts";
 import { ActiveWorkTimeout } from "./timeout.ts";
 import {
@@ -576,13 +576,23 @@ export class SubagentRuntime {
     const pending = [...this.followupTasks.values()].filter((task) => task.agent === handle && task.status === "accepted");
     const session = this.liveSessions.get(handle);
     const visible = session ? lastAssistant(session.messages) : undefined;
+    const lastMessage = visible ? preview(assistantText(visible), 160) : "";
+    const activity = invocation ? this.activities.get(invocation.id) : undefined;
+    const activeCallId = invocation ? [...(this.activeToolCalls.get(invocation.id)?.keys() ?? [])].at(-1) : undefined;
+    const call = activeCallId ? this.toolExecutions.get(handle)?.get(activeCallId) : undefined;
+    const args = call?.args;
+    const detail = args && typeof args === "object" && !Array.isArray(args)
+      ? call?.toolName === "bash" && "command" in args && typeof args.command === "string" ? args.command
+        : ["read", "write", "edit"].includes(call?.toolName ?? "") && "path" in args && typeof args.path === "string" ? args.path
+        : undefined
+      : undefined;
     return {
       agent: handle,
       role: preview(record.role, 80),
       status: invocation?.status ?? "idle",
-      ...(invocation ? { taskPreview: preview(invocation.task, 120), elapsedMs: Math.max(0, now - (invocation.startedAt ?? invocation.queuedAt)) } : {}),
-      ...(invocation && this.activities.get(invocation.id) ? { activity: selectedActivity(this.activities.get(invocation.id)!) } : {}),
-      ...(visible ? { progress: preview(assistantText(visible), 160) } : {}),
+      ...(invocation ? { taskPreview: preview(invocation.task, 120), elapsedMs: Math.max(0, (invocation.finishedAt ?? now) - (invocation.startedAt ?? invocation.queuedAt)) } : {}),
+      ...(activity ? { activity: selectedActivity({ ...activity, detail: detail ?? activity.detail }) } : {}),
+      ...(lastMessage ? { lastMessage } : {}),
       pendingSteering: pending.filter((task) => task.delivery === "steer").slice(0, 5).map(pendingItem),
       pendingQueue: pending.filter((task) => task.delivery === "queue").slice(0, 5).map(pendingItem),
     };
@@ -593,12 +603,13 @@ export class SubagentRuntime {
     const invocations = [...this.state.invocations.values()].filter((invocation) => invocation.batchId === batchId && (!callerHandle || this.ownerOfAgent(invocation.agent) === callerHandle));
     const live = invocations.filter((invocation) => invocation.status === "queued" || invocation.status === "running");
     const started = invocations.map((invocation) => invocation.startedAt ?? invocation.queuedAt).sort((a, b) => a - b)[0];
+    const finished = live.length === 0 ? Math.max(...invocations.map((invocation) => invocation.finishedAt ?? invocation.startedAt ?? invocation.queuedAt)) : Date.now();
     return {
       batch: batchId,
       liveAgents: live.length,
       totalAgents: invocations.length,
       status: !batch ? "unknown" : live.length > 0 ? "running" : "settled",
-      ...(started ? { elapsedMs: Math.max(0, Date.now() - started) } : {}),
+      ...(started !== undefined ? { elapsedMs: Math.max(0, finished - started) } : {}),
     };
   }
 
@@ -1148,7 +1159,7 @@ export class SubagentRuntime {
       // The subagent schema is policy-dependent. It is rebuilt below when the
       // session starts and refreshed before every later child turn after a
       // disable or preset/override change.
-      const tools = delegationPolicyAllowsControls ? [...resolved.role.tools, "subagent"] : [...resolved.role.tools];
+      const tools = toolsForRole(resolved.role, invocation.depth, this.options.config.defaults.maxDepth);
       const customTools: ToolDefinition<any, any, any>[] = [];
       if (tools.includes("web_search")) customTools.push(createWebSearchTool());
       let delegationTool: ToolDefinition<any, any, any> | undefined;
@@ -1230,7 +1241,7 @@ export class SubagentRuntime {
         });
         this.liveDelegationRefreshers.get(invocation.agent)!();
       }
-      before = statsUsage(session.getSessionStats());
+      before = sessionUsage(session);
       this.record({
         type: "invocation.running",
         id: invocation.id,
@@ -1294,7 +1305,7 @@ export class SubagentRuntime {
             }
           }
         } else if (event.type === "message_end" && event.message.role === "assistant" && session) {
-          const usage = usageWithPendingAssistant(usageDelta(statsUsage(session.getSessionStats()), before), event.message);
+          const usage = usageWithPendingAssistant(usageDelta(sessionUsage(session), before), event.message);
           if (!sameUsage(invocation.usage, usage)) {
             invocation.usage = usage;
             advanceStateRevision(this.state);
@@ -1320,7 +1331,7 @@ export class SubagentRuntime {
         unsubscribe();
       }
 
-      const usage = usageDelta(statsUsage(session.getSessionStats()), before);
+      const usage = usageDelta(sessionUsage(session), before);
       const final = lastAssistant(session.messages);
       if (controller.signal.aborted) {
         const timedOut = stopCause === "timeout";
@@ -1351,7 +1362,7 @@ export class SubagentRuntime {
       }
       return this.finish(invocation.id, "complete", usage, output);
     } catch (error) {
-      const usage = session ? usageDelta(statsUsage(session.getSessionStats()), before) : { ...ZERO_USAGE };
+      const usage = session ? usageDelta(sessionUsage(session), before) : { ...ZERO_USAGE };
       const timedOut = stopCause === "timeout";
       const cancelled = stopCause === "cancelled" || (controller.signal.aborted && !timedOut);
       return this.finish(
@@ -1689,7 +1700,18 @@ export class SubagentRuntime {
 }
 
 export function toolsForRole(role: Pick<AgentRole, "tools" | "delegates">, depth: number, maxDepth: number): string[] {
-  return role.delegates.length > 0 && depth < maxDepth ? [...role.tools, "subagent"] : [...role.tools];
+  const tools = [...new Set([...role.tools, "context_memory"])];
+  return role.delegates.length > 0 && depth < maxDepth ? [...tools, "subagent"] : tools;
+}
+
+function sessionUsage(session: AgentSession): Usage {
+  const native = statsUsage(session.getSessionStats());
+  const fallback = fallbackEntriesUsage(session.sessionManager.getEntries());
+  return {
+    input: native.input + fallback.input, output: native.output + fallback.output,
+    cacheRead: native.cacheRead + fallback.cacheRead, cacheWrite: native.cacheWrite + fallback.cacheWrite,
+    total: native.total + fallback.total, cost: native.cost + fallback.cost,
+  };
 }
 
 function statsUsage(stats: SessionStats): Usage {

@@ -1,4 +1,5 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
+import { fallbackUsage } from "../compaction/accounting.ts";
 import { ZERO_USAGE } from "./types.ts";
 import type { RuntimeState, SubagentEvent, Usage } from "./types.ts";
 
@@ -112,15 +113,22 @@ export function applyEvent(state: RuntimeState, event: SubagentEvent): void {
 export function sessionEntriesUsage(entries: readonly SessionEntry[]): Usage {
   const usage = { ...ZERO_USAGE };
   for (const entry of entries) {
-    if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-    usage.input += entry.message.usage.input;
-    usage.output += entry.message.usage.output;
-    usage.cacheRead += entry.message.usage.cacheRead;
-    usage.cacheWrite += entry.message.usage.cacheWrite;
-    usage.cost += entry.message.usage.cost.total;
+    const item = entry.type === "message" && entry.message.role === "assistant" ? entry.message.usage
+      : entry.type === "compaction" || entry.type === "branch_summary" ? entry.usage : fallbackUsage(entry);
+    if (!item) continue;
+    usage.input += item.input;
+    usage.output += item.output;
+    usage.cacheRead += item.cacheRead;
+    usage.cacheWrite += item.cacheWrite;
+    usage.cost += item.cost.total;
   }
   usage.total = usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
   return usage;
+}
+
+/** Extra durable work not represented by Pi's native getSessionStats(). */
+export function fallbackEntriesUsage(entries: readonly SessionEntry[]): Usage {
+  return sessionEntriesUsage(entries.filter((entry) => fallbackUsage(entry) !== undefined));
 }
 
 export function usageDelta(after: Usage, before: Usage): Usage {

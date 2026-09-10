@@ -284,14 +284,21 @@ function formatControlResult(result: ControlResult): string {
   if (result.action === "cancel") {
     return `[Subagents · cancel · ${formatTarget(result.target)} · ${result.status}]${result.stopped === undefined ? "" : `\nStopped ${result.stopped} scope(s).`}`;
   }
+  const elapsed = (ms: number | undefined) => ms === undefined ? "" : ` · elapsed=${(ms / 60_000).toFixed(1)}m`;
   const agents = result.agents.map((agent) => {
-    const activity = agent.activity ? ` activity=${agent.activity.tool ?? agent.activity.detail ?? "active"}` : "";
-    const progress = agent.progress ? ` progress=${agent.progress}` : "";
-    const task = agent.taskPreview ? ` task=${agent.taskPreview}` : "";
-    const pending = ` pending(steer=${agent.pendingSteering.map((item) => `${item.id}:${item.preview}`).join(",") || "-"};queue=${agent.pendingQueue.map((item) => `${item.id}:${item.preview}`).join(",") || "-"})`;
-    return `${agent.agent} ${agent.role} ${agent.status}${agent.elapsedMs === undefined ? "" : ` ${agent.elapsedMs}ms`}${task}${activity}${progress}${pending}`;
+    const lines = [`${agent.agent} · ${agent.role} · ${agent.status}${elapsed(agent.elapsedMs)}`];
+    if (agent.taskPreview) lines.push(`task: ${agent.taskPreview}`);
+    const activity = [agent.activity?.tool, agent.activity?.detail].filter(Boolean).join(" · ");
+    if (activity) lines.push(`activity: ${activity}`);
+    if (agent.lastMessage) lines.push(`last_message: ${agent.lastMessage}`);
+    const pending = [
+      ...agent.pendingSteering.map((item) => `steer ${item.id}: ${item.preview}`),
+      ...agent.pendingQueue.map((item) => `queue ${item.id}: ${item.preview}`),
+    ];
+    if (pending.length) lines.push(`pending: ${pending.join("; ")}`);
+    return lines.join("\n");
   });
-  const batches = result.batches.map((batch) => `${batch.batch} ${batch.status} live=${batch.liveAgents}/${batch.totalAgents}`);
+  const batches = result.batches.map((batch) => `${batch.batch} · ${batch.status}${elapsed(batch.elapsedMs)} · ${batch.liveAgents}/${batch.totalAgents} live`);
   return `[Subagents · inspect · ${formatTarget(result.target)}]\n${[...agents, ...batches].join("\n") || "No accessible live work."}${result.truncated ? "\n(truncated to bounded inspection limits)" : ""}`;
 }
 

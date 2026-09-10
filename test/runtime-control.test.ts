@@ -225,7 +225,9 @@ test("steering uses the live child session, rejects idle children, and does not 
   assert.throws(() => runtime.submitFollowups([{ agent: "atlas-1", messages: [{ message: "idle", delivery: "steer" }] }]), /Cannot steer idle/);
 });
 
-test("inspection is bounded, non-interrupting, and excludes raw tool payloads", () => {
+test("inspection is bounded, non-interrupting, and excludes raw tool payloads", (t) => {
+  let now = 120_002;
+  t.mock.method(Date, "now", () => now);
   const runtime = validationRuntime([]);
   runtime.state.agents.set("atlas-1", { handle: "atlas-1", role: "Atlas", sessionFile: "/tmp/atlas", createdAt: 1 });
   const invocation: InvocationRecord = {
@@ -247,6 +249,29 @@ test("inspection is bounded, non-interrupting, and excludes raw tool payloads", 
   assert.ok(result.agents[0]!.pendingSteering.length === 0);
   assert.ok(!JSON.stringify(result).includes("tool_arguments"));
   assert.equal(controller.signal.aborted, false, "inspection never interrupts work");
+  assert.equal(result.agents[0]!.elapsedMs, 120_000);
+  assert.equal(result.batches[0]!.elapsedMs, 120_000);
+  const internals = runtime as unknown as {
+    activeToolCalls: Map<string, Map<string, string>>;
+    toolExecutions: Map<string, Map<string, { toolName: string; args: unknown }>>;
+  };
+  internals.activeToolCalls.set(invocation.id, new Map([["call-1", "read"]]));
+  internals.toolExecutions.set("atlas-1", new Map([["call-1", {
+    toolName: "read", args: { path: "src/" + "long-path/".repeat(20), unrelated: "DO_NOT_EXPOSE" },
+  }]]));
+  const active = runtime.controlAction({ action: "inspect", target: { agent: "atlas-1" } });
+  assert.equal(active.action, "inspect");
+  assert.match(active.agents[0]!.activity!.detail!, /^src\/long-path/);
+  assert.ok(active.agents[0]!.activity!.detail!.length <= 80);
+  assert.ok(!JSON.stringify(active).includes("DO_NOT_EXPOSE"));
+  invocation.status = "complete";
+  invocation.finishedAt = 180_002;
+  now = 600_002;
+  const settled = runtime.controlAction({ action: "inspect", target: { all: true } });
+  assert.equal(settled.action, "inspect");
+  assert.equal(settled.agents[0]!.elapsedMs, 180_000, "completed agent duration is frozen");
+  assert.equal(settled.batches[0]!.elapsedMs, 180_000, "settled batch duration is frozen");
+  assert.equal(settled.batches[0]!.status, "settled");
 });
 
 test("nested control ownership and disabled-role controls remain enforced", () => {
