@@ -107,12 +107,13 @@ export function createFooterController(
 }
 
 export function contextLabelFor(
-  usage: { percent: number | null; contextWindow: number } | undefined,
+  usage: { tokens: number | null; percent: number | null; contextWindow: number } | undefined,
   theme: Theme,
 ): string {
   if (!usage) return "";
   const percent = usage.percent === null ? undefined : Math.round(usage.percent);
-  const text = `${percent === undefined ? "?" : percent}%/${formatCompactNumber(usage.contextWindow)}`;
+  const compact = (value: number) => formatCompactNumber(value).replace(/\.0([kM])$/, "$1");
+  const text = `${usage.tokens === null ? "?" : compact(usage.tokens)}/${compact(usage.contextWindow)}`;
   if (percent === undefined || percent <= 65) return theme.fg("muted", text);
   return theme.fg(percent > 75 ? "error" : "warning", text);
 }

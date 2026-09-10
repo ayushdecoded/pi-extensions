@@ -4,7 +4,7 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { advanceStateRevision, applyEvent, emptyRuntimeState, SUBAGENT_ENTRY_TYPE } from "../src/runtime/state.ts";
 import type { InvocationRecord, Usage } from "../src/runtime/types.ts";
 import { footerUsageTotals } from "../src/ui/accounting.ts";
-import { costLabel, createFooterController, mainSessionCacheHit, modelLabel, sessionCostColor, tokenLabel } from "../src/ui/footer.ts";
+import { contextLabelFor, costLabel, createFooterController, mainSessionCacheHit, modelLabel, sessionCostColor, tokenLabel } from "../src/ui/footer.ts";
 
 const parentLeaf = assistantEntry("parent-leaf", usage(10, 4, 20, 7, 1));
 const parentOther = assistantEntry("parent-other", usage(5, 2, 8, 3, 0.5));
@@ -15,6 +15,15 @@ const leafChildEntries = invocationEntries(childLeaf);
 const otherChildEntries = invocationEntries(childOther);
 const branch = [parentLeaf, ...leafChildEntries];
 const entries = [...branch, parentOther, ...otherChildEntries];
+
+test("composer context shows compact token counts and retains usage colors", () => {
+  const theme = taggedTheme();
+  assert.equal(contextLabelFor({ tokens: 44_000, contextWindow: 272_000, percent: 16.2 }, theme), "<muted>44k/272k</muted>");
+  assert.equal(contextLabelFor({ tokens: 190_400, contextWindow: 272_000, percent: 70 }, theme), "<warning>190.4k/272k</warning>");
+  assert.equal(contextLabelFor({ tokens: 217_600, contextWindow: 272_000, percent: 80 }, theme), "<error>217.6k/272k</error>");
+  assert.equal(contextLabelFor({ tokens: null, contextWindow: 272_000, percent: null }, theme), "<muted>?/272k</muted>");
+  assert.equal(contextLabelFor(undefined, theme), "");
+});
 
 test("footer totals combine native and subagent usage once for leaf and complete tree", () => {
   const totals = footerUsageTotals(branch, entries);
