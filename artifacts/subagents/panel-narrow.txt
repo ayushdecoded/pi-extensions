@@ -1,0 +1,30 @@
+ Pi can explain its own features and look up its
+ docs. Ask it how to use or extend Pi.
+
+[Skills]
+  diagnose-crash, error-tracking-react, hey, omarchy
+   ╭────────────────────────────────────────────╮
+[Ex│   Agents                                   │
+  s│   4 running · 4 sessions                   │
+   │                                            │
+   │ › ● Forge  running · 3m 36s                │
+ Re│     Implement token refresh safely         │s,
+ th│                                            │
+   │     ↳ ● Atlas  running · 3m 36s            │
+   │       ↳ Trace refresh-token ownership      │
+AGE│                                            │
+   │   ● Vigil  running · 3m 36s                │
+  ●│     Review concurrent session recovery     │
+   │                                            │
+   │   ● minimal  running · 3m 36s              │
+   │     Check documentation 日本語 🔍          │
+  ●│                                            │
+   │                                            │
+  ●│   ↑↓ select · Enter details                │
+   │   C cancel · Esc close                     │
+   ╰────────────────────────────────────────────╯
+────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────
+~/Projects/pi-extensions (main)
+0.0%/0 (auto)                                unknown

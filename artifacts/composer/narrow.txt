@@ -1,0 +1,30 @@
+ ▀▀█  v0.99.2
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit ·
+ / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded
+ resources.
+
+ Pi can explain its own features and look up its
+ docs. Ask it how to use or extend Pi.
+
+[Extensions]
+  composer.ts, composer/ui-fixture.ts, subagents,
+subagents/ui-fixture.ts
+
+
+ Offline composer fixture: 98.8% cache hit, $53.422
+ cost, approximately 16% context.
+
+
+ Offline spinner chresume
+
+
+ Operation aborted
+
+ Reloaded keybindings, extensions, skills, prompts,
+ themes, and context files
+
+──────────────────────────────────────── 17%/272k ──
+
+────────────────────────────────────────────────────
+~/Projects/pi-extensions (main) $53.422

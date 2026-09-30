@@ -1,0 +1,36 @@
+ - Atlas: Luna, high reasoning
+ - Forge: DeepSeek Flash, high reasoning
+ - Vigil: Astra, high reasoning
+
+
+ ctrl+o details
+
+ ✓ Forge  Implement token refresh safely  completed
+
+ Checked the configured models and extension entry points.
+
+ - Atlas: Luna, high reasoning
+ - Forge: DeepSeek Flash, high reasoning
+ - Vigil: Astra, high reasoning
+
+
+ ctrl+o details
+
+ Reloaded keybindings, extensions, skills, prompts, themes, and context files
+
+
+AGENTS  0 running · 4 done   Alt+M collapse
+
+  ✓ Forge  Implement token refresh safely                                                       completed · 1s
+    8k tokens · $0.020
+    ↳ ✓ Atlas  Trace refresh-token ownership                                                    completed · 1s
+      ↳ 4k tokens · $0.010
+  ✓ Vigil  Review concurrent session recovery                                                   completed · 1s
+    4k tokens · $0.010
+  ✓ minimal  Check documentation 日本語 🔍                                                      completed · 1s
+    4k tokens · $0.010
+
+────────────────────────────────────────────────────────────────────────────────────────────────── 16%/272k ──
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Projects/pi-extensions (main) CH98.8% $53.462                                             demo-272k • medium

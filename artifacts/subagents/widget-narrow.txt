@@ -1,0 +1,30 @@
+ Press ctrl+o to show full startup help and loaded
+ resources.
+
+ Pi can explain its own features and look up its
+ docs. Ask it how to use or extend Pi.
+
+[Extensions]
+  subagents, ui-fixture.ts
+
+
+ Reloaded keybindings, extensions, skills, prompts,
+ themes, and context files
+
+
+AGENTS  4 running · 0 done   Alt+M collapse
+
+  ● Forge  running · 20s
+    Implement token refresh safely
+    ↳ ● Atlas  running · 20s
+      ↳ Trace refresh-token ownership
+  ● Vigil  running · 20s
+    Review concurrent session recovery
+  ● minimal  running · 20s
+    Check documentation 日本語 🔍
+
+────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────
+~/Projects/pi-extensions (main)
+0.0%/0 (auto)                                unknown

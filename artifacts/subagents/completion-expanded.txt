@@ -1,0 +1,36 @@
+
+ - Atlas: Luna, high reasoning
+ - Forge: DeepSeek Flash, high reasoning
+ - Vigil: Astra, high reasoning
+
+ No files changed.
+
+ Additional evidence is available in the full report.
+
+ Handle: minimal-12564673-5f87-4323-86d5-f7bb995b9417
+ Session: not saved
+ 4k tokens · $0.000
+
+ ✓ Forge  Implement token refresh safely  completed
+
+ Checked the configured models and extension entry points.
+
+ - Atlas: Luna, high reasoning
+ - Forge: DeepSeek Flash, high reasoning
+ - Vigil: Astra, high reasoning
+
+ No files changed.
+
+ Additional evidence is available in the full report.
+
+ Handle: forge-7784e692-e45d-4b4c-8cdc-2927acfb348a
+ Session: not saved
+ 8k tokens · $0.000
+
+ Tool output: expanded
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Projects/pi-extensions (main)
+0.0%/0 (auto)                                                                                          unknown

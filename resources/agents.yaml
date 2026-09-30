@@ -1,0 +1,25 @@
+version: 1
+# Model and thinking inherit from the spawning agent unless configured here or per agent.
+defaults: {}
+titling:
+  model: openai-codex/gpt-6-luna
+  thinking: low
+agents:
+  Atlas:
+    model: openai-codex/gpt-6-luna
+    thinking: high
+    description: Read-only codebase and web researcher for focused fact-finding, not design or implementation.
+    prompt: agents/atlas.md
+    tools: [read, bash, web]
+  Forge:
+    model: opencode-go/deepseek-v4.1-flash
+    thinking: high
+    description: Implementation agent for approved, bounded changes with explicit ownership and acceptance criteria.
+    prompt: agents/forge.md
+    tools: [read, bash, edit, write]
+  Vigil:
+    model: openai-codex/gpt-6-astra
+    thinking: high
+    description: Adversarial reviewer of consequential decisions and changes; provide intent, constraints, and rationale.
+    prompt: agents/vigil.md
+    tools: [read, bash]

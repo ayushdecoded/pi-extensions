@@ -1,0 +1,36 @@
+
+ - Atlas: Luna, high reasoning
+ - Forge: DeepSeek Flash, high reasoning
+ - Vigil: Astra, high reasoning
+
+
+ ctrl+o details
+
+ ✓ Forge  Implement token refresh safely  completed
+
+ Checked the configured models and extension entry points.
+
+ - Atlas: Luna, high reasoning
+ - Forge: DeepSeek Flash, high reasoning
+ - Vigil: Astra, high reasoning
+
+
+ ctrl+o details
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Projects/pi-extensions (main)
+0.0%/0 (auto)                                                                                          unknown
+
+
+
+
+
+
+
+
+
+
+
+

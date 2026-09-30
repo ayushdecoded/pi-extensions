@@ -1,0 +1,2 @@
+# Terminal captures preserve empty rows to document the viewport height.
+artifacts/**/*.txt whitespace=-blank-at-eof

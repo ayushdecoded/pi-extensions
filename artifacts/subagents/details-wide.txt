@@ -1,0 +1,36 @@
+ ▀▀█  v0.99.2
+ █▀ █ escape interrupt · ctrl+c/ctrl+d clear/exit · / commands · ! bash · ctrl+o more
+ Press ctrl+o to show full startup help and loaded resources.
+
+ Pi c╭─────────────────────────────────────────────────────────────────────────────────────────────────╮
+     │   Agents                                                                                        │
+[Skil│   3 running · 4 sessions                                                                        │
+  dia│                                                                                                 │
+     │  ### Review concurrent session recovery                                                         │
+[Exte│                                                                                                 │
+  sub│  Vigil · cancelled · depth 1                                                                    │
+     │                                                                                                 │
+     │  Model: openai-codex/gpt-6-astra · reasoning: high                                              │
+ Relo│                                                                                                 │
+     │  Handle: vigil-9580fe07-2037-4d28-8e31-80c65f321c54                                             │
+     │                                                                                                 │
+ [fix│  Session: starting                                                                              │
+     │                                                                                                 │
+ Vigi│  Tools: read, bash                                                                              │
+     │                                                                                                 │
+     │  ### Task                                                                                       │
+     │                                                                                                 │
+AGENT│  Vigil: audit authentication and preserve existing work                                         │
+     │                                                                                                 │
+  ● F│  ### Result                                                                                     │5m 33s
+    e│                                                                                                 │
+    ↳│  The operation was aborted.                                                                     │5m 33s
+     │                                                                                                 │
+  ● m│                                                                                                 │5m 33s
+    r│   ↑↓ scroll · V transcript · Esc back                                                           │
+     ╰─────────────────────────────────────────────────────────────────────────────────────────────────╯
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────
+~/Projects/pi-extensions (main)
+0.0%/0 (auto)                                                                                          unknown

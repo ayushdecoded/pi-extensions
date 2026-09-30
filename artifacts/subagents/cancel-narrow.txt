@@ -1,0 +1,30 @@
+  diagnose-crash, error-tracking-react, hey, omarchy
+
+[Extensions]
+  subagents, ui-fixture.ts
+
+   ╭────────────────────────────────────────────╮
+ Re│   Agents                                   │s,
+ th│   3 running · 4 sessions                   │
+   │                                            │
+   │   ● Forge  running · 3m 38s                │
+ [f│     Implement token refresh safely         │
+   │                                            │
+ Vi│     ↳ ● Atlas  running · 3m 38s            │
+   │       ↳ Trace refresh-token ownership      │
+   │                                            │
+   │ › × Vigil  cancelled · 3m 37s              │
+AGE│     Review concurrent session recovery     │
+   │                                            │
+  ●│   ● minimal  running · 3m 38s              │
+   │     Check documentation 日本語 🔍          │
+   │                                            │
+   │                                            │
+  ●│   ↑↓ select · Enter details                │
+   │   C cancel · Esc close                     │
+   ╰────────────────────────────────────────────╯
+────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────
+~/Projects/pi-extensions (main)
+0.0%/0 (auto)                                unknown
