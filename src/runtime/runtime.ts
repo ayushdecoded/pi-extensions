@@ -1700,7 +1700,7 @@ export class SubagentRuntime {
 }
 
 export function toolsForRole(role: Pick<AgentRole, "tools" | "delegates">, depth: number, maxDepth: number): string[] {
-  const tools = [...new Set([...role.tools, "context_memory"])];
+  const tools = [...new Set(role.tools)];
   return role.delegates.length > 0 && depth < maxDepth ? [...tools, "subagent"] : tools;
 }
 

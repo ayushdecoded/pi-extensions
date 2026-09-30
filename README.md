@@ -159,30 +159,6 @@ Fallback is lazy, never eager: a remote failure uses normal Pi/native compaction
 
 Checkpoints and lazy summaries survive reload and branch navigation. Until a lazy summary is materialized, UI/export surfaces can show only the opaque checkpoint marker; the original raw archive is retained. Pi's native `getSessionStats()` cannot count custom lazy-summary entries, but this pack's totals and child invocation accounting include them. `/handoff` and branch-summary are separate Pi-native flows, not server compaction. After `/reload`, already-live children keep their old extension code; the new code applies to the next session instance.
 
-## Local context memory
-
-Main and native child sessions have one `context_memory` tool:
-
-```ts
-context_memory({ action: "search", query: "received 401" }); // literal, case-insensitive, newest first
-context_memory({ action: "list" }); // newest readable active-branch entries
-context_memory({ action: "list", before: "returned-nextBefore" }); // next list page
-context_memory({ action: "read", ref: "returned-history-ref" });
-context_memory({ action: "read", ref: "notes" });
-context_memory({ action: "edit", ref: "notes", edits: [{ oldText: "", newText: "Next: inspect cookies." }] });
-context_memory({ action: "edit", ref: "notes", edits: [{ oldText: "cookies", newText: "refresh" }] });
-```
-
-Terminal output uses compact action headers, readable result excerpts, and bounded note/read previews; expanding a tool result reveals the full returned page and metadata. The model still receives the structured result unchanged.
-
-Search covers persisted conversation text, tool calls/results, and background completion reports across all branches in the current session, including history before compaction. Shared ancestors appear only once; search and history reads mark off-branch evidence with `offBranch`, since it may reflect discarded decisions. No tree-navigation API is exposed. It excludes reasoning, images, internal bookkeeping, and memory-tool calls/results. Search results include history `ref` values, bounded excerpts, a `readOffset` start position (pass it as `offset` to `read`), and a `nextBefore` cursor (pass as `before`). `list` returns up to 8 readable active-branch entries newest first, with bounded 400-character start previews and the same `nextBefore` pagination cursor. Reads return up to 8,000 characters with `nextOffset` (pass as `offset`) and ancestry-based `previousRef`/`nextRef` values, never unrelated neighboring log records. `nextRef` is null when continuation would require choosing between branches. Only archived text is recoverable; truncated or unrecorded output is not restored.
-
-Each session owns one branch-aware working note (maximum 6,000 characters), addressed as `ref: "notes"` through `read` and `edit`. An edit batch contains 1–32 exact `oldText`/`newText` replacements, all matched against the original note. Nonempty matches must be unique and non-overlapping; a missing, ambiguous, overlapping, or oversized batch fails without saving anything. Empty `oldText` appends verbatim (supply your own newlines); empty `newText` deletes. Appends are concatenated in request order after replacements. The size limit applies to the final note. Successful edits return only confirmation and character count. History is immutable. The former `notes`/`save_notes` actions are replaced, but existing saved note revisions remain readable. Revisions are custom entries in the existing session log, so reload and branch navigation restore the applicable version. Saving requires an existing persisted session. Children receive this utility automatically, independently of their configured workspace tools; they cannot use it to read another session. Child follow-ups reopen their own notes, and parent/child findings still travel through normal completion reports.
-
-Existing compaction and its scheduling are unchanged. After a compaction boundary, the note revision at that boundary is explicitly included alongside the summary/checkpoint. This snapshot is reconstructed from the archive and stays stable within that context window, even if newer notes are saved; `read` with `ref: "notes"` reads the latest active-branch revision. Notes are ordinary inspectable tool output, not hidden reasoning. No automatic note-generation calls, embeddings, separate database, TTL timers, or cache keepalives are added. Tool usage is included in normal session accounting; lower overall cost is not guaranteed.
-
-Run `/reload` or restart to activate the tool. Already-running children retain their loaded extension code until their next session instance.
-
 ## Session transfer and prompt commands
 
 Use `/handoff [optional next goal]` to transfer the recorded work into a fresh parent-linked session. The command runs a normal main-agent summary turn with the existing tools and subagent orchestration available, waits for it to settle, and opens the generated chronological handoff for review. Accepting the review creates the new session and places the edited handoff in its editor; it is never submitted automatically. With no argument, the handoff continues the current work from its present state. For unusually large, compacted, or incomplete histories, the agent may use read-only Atlas subagents to inspect the saved session history.

@@ -11,7 +11,6 @@ import type { AgentRole } from "../config/agents.ts";
 import { createVisionHookExtension } from "./vision-hook.ts";
 import { filterVisibleSkills } from "../skills-policy.ts";
 import { registerServerCompaction } from "../compaction/server-compaction.ts";
-import { registerContextMemory } from "../context-memory/index.ts";
 
 export async function createRoleResourceLoader(
   cwd: string,
@@ -36,7 +35,6 @@ export async function createRoleResourceLoader(
     noThemes: true,
     extensionFactories: [
       ...(accountExtension ? [accountExtension] : []),
-      { name: "context-memory", factory: registerContextMemory },
       { name: "codex-server-compaction", factory: registerServerCompaction },
       createVisionHookExtension(
         () => ({ sidecar: role.image, promptFile: role.imagePromptFile }),

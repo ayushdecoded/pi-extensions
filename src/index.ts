@@ -71,7 +71,6 @@ import { FullPasteEditor } from "./ui/full-paste-editor.ts";
 import { registerPromptDuration } from "./ui/prompt-duration.ts";
 import { registerProactiveCompaction } from "./proactive-compaction.ts";
 import { registerServerCompaction } from "./compaction/server-compaction.ts";
-import { registerContextMemory } from "./context-memory/index.ts";
 import { createPainterTool } from "./painter.ts";
 import { createPainterModelStore, isPainterModelId, PAINTER_MODELS, projectPainterModelsPath, type PainterModelId } from "./painter/models.ts";
 import { createDirectorTool } from "./director.ts";
@@ -273,7 +272,6 @@ export default function subagentExtension(pi: ExtensionAPI): void {
   registerBreakdownCommand(pi);
   registerPromptDuration(pi);
   registerProactiveCompaction(pi);
-  registerContextMemory(pi);
   registerServerCompaction(pi);
   registerWebSearch(pi);
   // Painter image model: session override wins, then project file, then the
